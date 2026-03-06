@@ -4,7 +4,7 @@ create table xero_connections (
   tenant_id text not null unique,
   tenant_name text,
   access_token text not null,
-  refresh_token text not null,
+  refresh_token text,
   token_expires_at timestamptz not null,
   scopes text[],
   last_synced_at timestamptz,

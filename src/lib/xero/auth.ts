@@ -1,35 +1,14 @@
 import { supabase } from "@/lib/supabase";
 import type { XeroTokenResponse, XeroConnection } from "@/types/xero";
 
-const XERO_AUTH_URL = "https://login.xero.com/identity/connect/authorize";
 const XERO_TOKEN_URL = "https://login.xero.com/identity/connect/token";
 const XERO_CONNECTIONS_URL = "https://api.xero.com/connections";
 
-const SCOPES = [
-  "openid",
-  "profile",
-  "email",
-  "accounting.transactions.read",
-  "accounting.contacts.read",
-  "accounting.settings.read",
-  "accounting.reports.read",
-].join(" ");
-
-export function getAuthorizationUrl(state: string): string {
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: process.env.XERO_CLIENT_ID!,
-    redirect_uri: process.env.XERO_REDIRECT_URI!,
-    scope: SCOPES,
-    state,
-  });
-
-  return `${XERO_AUTH_URL}?${params.toString()}`;
-}
-
-export async function exchangeCodeForTokens(
-  code: string
-): Promise<XeroTokenResponse> {
+/**
+ * Custom Connection: client_credentials grant.
+ * No user login needed — token is obtained directly.
+ */
+export async function getClientCredentialsToken(): Promise<XeroTokenResponse> {
   const credentials = Buffer.from(
     `${process.env.XERO_CLIENT_ID}:${process.env.XERO_CLIENT_SECRET}`
   ).toString("base64");
@@ -41,42 +20,13 @@ export async function exchangeCodeForTokens(
       Authorization: `Basic ${credentials}`,
     },
     body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: process.env.XERO_REDIRECT_URI!,
+      grant_type: "client_credentials",
     }),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
-  }
-
-  return response.json();
-}
-
-export async function refreshAccessToken(
-  refreshToken: string
-): Promise<XeroTokenResponse> {
-  const credentials = Buffer.from(
-    `${process.env.XERO_CLIENT_ID}:${process.env.XERO_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const response = await fetch(XERO_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token refresh failed: ${error}`);
+    throw new Error(`Token request failed: ${error}`);
   }
 
   return response.json();
@@ -96,6 +46,10 @@ export async function getXeroConnections(
   return response.json();
 }
 
+/**
+ * Get a valid access token, refreshing via client_credentials if expired.
+ * Custom Connections don't use refresh tokens — just request a new token.
+ */
 export async function getValidAccessToken(
   connectionId: string
 ): Promise<{ accessToken: string; tenantId: string }> {
@@ -113,15 +67,14 @@ export async function getValidAccessToken(
   const now = new Date();
   const fiveMinutes = 5 * 60 * 1000;
 
-  // Refresh if within 5 minutes of expiry
+  // Re-authenticate if within 5 minutes of expiry
   if (expiresAt.getTime() - now.getTime() < fiveMinutes) {
-    const tokens = await refreshAccessToken(conn.refresh_token);
+    const tokens = await getClientCredentialsToken();
 
     await supabase
       .from("xero_connections")
       .update({
         access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
         token_expires_at: new Date(
           Date.now() + tokens.expires_in * 1000
         ).toISOString(),
