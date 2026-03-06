@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { clearSession } from "@/lib/auth";
 
+// No session to clear — API key auth is stateless.
 export async function POST() {
-  await clearSession();
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession } from "./auth";
+import { getConnectionId } from "./auth";
 
 export function json<T>(data: T, status = 200): NextResponse {
   return NextResponse.json(data, { status });
@@ -10,11 +10,11 @@ export function error(message: string, status = 400): NextResponse {
 }
 
 export async function requireConnection(): Promise<string> {
-  const session = await getSession();
-  if (!session?.connectionId) {
+  const connectionId = await getConnectionId();
+  if (!connectionId) {
     throw new AuthError("Not authenticated");
   }
-  return session.connectionId;
+  return connectionId;
 }
 
 export class AuthError extends Error {

@@ -1,47 +1,25 @@
-import { SignJWT, jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { headers } from "next/headers";
+import { supabase } from "./supabase";
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET!);
-const COOKIE_NAME = "floaters_session";
+/**
+ * Single-user auth via API key in Authorization header.
+ * Frontend sends: Authorization: Bearer <CONNECT_SECRET>
+ * No cookies, no JWT, no cross-domain issues.
+ */
+export async function getConnectionId(): Promise<string | null> {
+  const headerStore = await headers();
+  const authHeader = headerStore.get("authorization");
 
-export interface SessionPayload {
-  connectionId: string;
-  tenantId: string;
-}
+  if (!authHeader?.startsWith("Bearer ")) return null;
+  const apiKey = authHeader.slice(7);
 
-export async function createSession(payload: SessionPayload): Promise<string> {
-  const token = await new SignJWT(payload as unknown as Record<string, unknown>)
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("30d")
-    .sign(JWT_SECRET);
+  if (apiKey !== process.env.CONNECT_SECRET) return null;
 
-  const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "none",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  });
+  const { data } = await supabase
+    .from("xero_connections")
+    .select("id")
+    .limit(1)
+    .single();
 
-  return token;
-}
-
-export async function getSession(): Promise<SessionPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as unknown as SessionPayload;
-  } catch {
-    return null;
-  }
-}
-
-export async function clearSession(): Promise<void> {
-  const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+  return data?.id || null;
 }

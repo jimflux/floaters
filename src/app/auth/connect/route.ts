@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClientCredentialsToken, getXeroConnections } from "@/lib/xero/auth";
-import { createSession } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { runSync } from "@/lib/xero/sync";
 
 /**
- * Custom Connection auth: no user redirect needed.
- * Protected by CONNECT_SECRET query param to prevent unauthorized access.
+ * Connects to Xero via Custom Connection (client_credentials).
+ * Protected by CONNECT_SECRET query param.
  * Usage: GET /auth/connect?secret=YOUR_CONNECT_SECRET
+ *
+ * No cookies/sessions — just stores the Xero connection in DB.
+ * All subsequent API calls use Authorization: Bearer <CONNECT_SECRET>.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -17,6 +19,7 @@ export async function GET(request: NextRequest) {
     if (!secret || secret !== process.env.CONNECT_SECRET) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
     // Get token via client credentials
     const tokens = await getClientCredentialsToken();
 
@@ -31,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     const tenant = connections[0];
 
-    // Upsert connection (no refresh token for custom connections)
+    // Upsert connection
     const { data: conn, error: dbError } = await supabase
       .from("xero_connections")
       .upsert(
@@ -55,21 +58,16 @@ export async function GET(request: NextRequest) {
       throw new Error(`Failed to store connection: ${dbError?.message}`);
     }
 
-    // Create session
-    await createSession({
-      connectionId: conn.id,
-      tenantId: tenant.tenantId,
-    });
-
     // Trigger initial sync in background
     runSync(conn.id, true).catch((err) =>
       console.error("Initial sync failed:", err)
     );
 
-    // Redirect to frontend
-    return NextResponse.redirect(
-      `${process.env.FRONTEND_URL}/dashboard`
-    );
+    return NextResponse.json({
+      ok: true,
+      tenantName: tenant.tenantName,
+      message: "Connected to Xero. Initial sync started.",
+    });
   } catch (err) {
     console.error("Connect error:", err);
     return NextResponse.json(
