@@ -53,75 +53,8 @@ export async function GET() {
 export async function POST() {
   try {
     const connectionId = await requireConnection();
-
-    // Debug: test Xero API directly before running full sync
-    const { getValidAccessToken } = await import("@/lib/xero/auth");
-    const { accessToken, tenantId } = await getValidAccessToken(connectionId);
-
-    // Test invoices endpoint directly
-    const invoiceUrl = new URL("https://api.xero.com/api.xro/2.0/Invoices");
-    invoiceUrl.searchParams.set("where", 'Status!="PAID"&&Status!="VOIDED"&&Status!="DELETED"');
-    invoiceUrl.searchParams.set("page", "1");
-
-    const invoiceRes = await fetch(invoiceUrl.toString(), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Xero-Tenant-Id": tenantId,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    });
-
-    const invoiceBody = await invoiceRes.json();
-    const invoiceCount = invoiceBody.Invoices?.length ?? "missing key";
-
-    // Test bank transactions endpoint directly
-    const bankUrl = new URL("https://api.xero.com/api.xro/2.0/BankTransactions");
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 1);
-    bankUrl.searchParams.set("where", `Date>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`);
-    bankUrl.searchParams.set("page", "1");
-
-    const bankRes = await fetch(bankUrl.toString(), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Xero-Tenant-Id": tenantId,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-    });
-
-    const bankBody = await bankRes.json();
-    const bankCount = bankBody.BankTransactions?.length ?? "missing key";
-
-    // Now run full sync
     const records = await runSync(connectionId, true);
-
-    // Check what ended up in the DB
-    const { count: dbInvoices } = await supabase
-      .from("xero_invoices")
-      .select("*", { count: "exact", head: true })
-      .eq("connection_id", connectionId);
-
-    const { count: dbBankTxns } = await supabase
-      .from("xero_bank_transactions")
-      .select("*", { count: "exact", head: true })
-      .eq("connection_id", connectionId);
-
-    return json({
-      ok: true,
-      recordsSynced: records,
-      debug: {
-        xeroInvoiceApiStatus: invoiceRes.status,
-        xeroInvoiceCount: invoiceCount,
-        xeroInvoiceError: invoiceRes.ok ? null : JSON.stringify(invoiceBody).slice(0, 500),
-        xeroBankApiStatus: bankRes.status,
-        xeroBankCount: bankCount,
-        xeroBankError: bankRes.ok ? null : JSON.stringify(bankBody).slice(0, 500),
-        dbInvoicesAfterSync: dbInvoices,
-        dbBankTxnsAfterSync: dbBankTxns,
-      },
-    });
+    return json({ ok: true, recordsSynced: records });
   } catch (err) {
     return handleError(err);
   }

@@ -119,11 +119,15 @@ export interface AccountGroup {
 
 // GET /api/cashflow
 export interface CashflowResponse {
+  currentBalance: number;
+  fallsBelowZeroIn: string | null;
+  currentMonthIndex: number;
   months: string[]; // ["2025-12", "2026-01", ...]
   cashIn: CashflowAccount[];
   cashOut: CashflowAccount[];
   openingBalance: number[];
   closingBalance: number[];
+  netCashMovement: number[];
 }
 
 export interface CashflowAccount {

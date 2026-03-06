@@ -1,7 +1,13 @@
 import { requireConnection, json, handleError } from "@/lib/api-helpers";
 import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
-import { format, addMonths, subMonths, startOfMonth } from "date-fns";
+import {
+  format,
+  addMonths,
+  subMonths,
+  startOfMonth,
+  differenceInMonths,
+} from "date-fns";
 import type { CashflowResponse, CashflowAccount } from "@/types/api";
 
 export async function GET(request: NextRequest) {
@@ -9,127 +15,149 @@ export async function GET(request: NextRequest) {
     const connectionId = await requireConnection();
     const { searchParams } = new URL(request.url);
 
-    const monthsBack = parseInt(searchParams.get("back") || "6", 10);
-    const monthsForward = parseInt(searchParams.get("forward") || "6", 10);
-    const historyForAvg = 3; // average last 3 months for projections
+    const monthsBack = parseInt(searchParams.get("back") || "3", 10);
+    const monthsForward = parseInt(searchParams.get("forward") || "12", 10);
+    const historyForAvg = 3;
 
     const now = startOfMonth(new Date());
     const from = subMonths(now, monthsBack);
     const to = addMonths(now, monthsForward);
 
-    // Build list of month keys
+    // Build month keys
     const months: string[] = [];
     let cursor = from;
     while (cursor < to) {
       months.push(format(cursor, "yyyy-MM"));
       cursor = addMonths(cursor, 1);
     }
+    const currentMonthIndex = months.indexOf(format(now, "yyyy-MM"));
 
-    const currentMonthIdx = months.indexOf(format(now, "yyyy-MM"));
+    // Fetch all data in parallel
+    const [bankTxnResult, invoiceResult, bankAccountResult] = await Promise.all(
+      [
+        supabase
+          .from("xero_bank_transactions")
+          .select("type, account_code, account_name, total, date")
+          .eq("connection_id", connectionId)
+          .gte("date", format(from, "yyyy-MM-dd"))
+          .order("date", { ascending: true }),
+        supabase
+          .from("xero_invoices")
+          .select("type, contact_name, total, amount_due, due_date, status")
+          .eq("connection_id", connectionId)
+          .in("status", ["AUTHORISED", "SUBMITTED", "DRAFT"]),
+        supabase
+          .from("xero_accounts")
+          .select("current_balance")
+          .eq("connection_id", connectionId)
+          .eq("type", "BANK"),
+      ]
+    );
 
-    // Fetch bank transactions (historical actuals)
-    const { data: bankTxns } = await supabase
-      .from("xero_bank_transactions")
-      .select("type, account_code, account_name, total, date, contact_name")
-      .eq("connection_id", connectionId)
-      .gte("date", format(from, "yyyy-MM-dd"))
-      .order("date", { ascending: true });
+    const bankTxns = bankTxnResult.data || [];
+    const invoices = invoiceResult.data || [];
+    const bankAccounts = bankAccountResult.data || [];
 
-    // Fetch outstanding invoices (future expected)
-    const { data: invoices } = await supabase
-      .from("xero_invoices")
-      .select("type, contact_name, total, amount_due, due_date, status")
-      .eq("connection_id", connectionId)
-      .in("status", ["AUTHORISED", "SUBMITTED", "DRAFT"]);
-
-    // Fetch bank account balances for opening
-    const { data: bankAccounts } = await supabase
-      .from("xero_accounts")
-      .select("current_balance")
-      .eq("connection_id", connectionId)
-      .eq("type", "BANK");
-
-    const currentBalance = (bankAccounts || []).reduce(
+    const currentBalance = bankAccounts.reduce(
       (sum, a) => sum + (Number(a.current_balance) || 0),
       0
     );
 
-    // Group bank transactions by account and month
-    type AccountMonthMap = Map<string, { name: string; months: Map<string, number> }>;
-    const cashInMap: AccountMonthMap = new Map();
-    const cashOutMap: AccountMonthMap = new Map();
+    // Group bank transactions by account+month
+    type MonthTotals = Map<string, number>;
+    type AccountData = { name: string; months: MonthTotals };
+    type AccountMap = Map<string, AccountData>;
 
-    for (const txn of bankTxns || []) {
+    const cashInMap: AccountMap = new Map();
+    const cashOutMap: AccountMap = new Map();
+
+    for (const txn of bankTxns) {
       const monthKey = (txn.date as string).slice(0, 7);
       if (!months.includes(monthKey)) continue;
 
       const isInflow = txn.type === "RECEIVE";
       const map = isInflow ? cashInMap : cashOutMap;
-      const code = txn.account_code || txn.account_name || "Unknown";
-      const name = txn.account_name || txn.account_code || "Unknown";
+      const code = txn.account_name || txn.account_code || "Other";
 
       if (!map.has(code)) {
-        map.set(code, { name, months: new Map() });
+        map.set(code, { name: code, months: new Map() });
       }
       const acc = map.get(code)!;
       acc.months.set(monthKey, (acc.months.get(monthKey) || 0) + Number(txn.total));
     }
 
-    // Add outstanding invoices to future months
-    for (const inv of invoices || []) {
-      if (!inv.due_date) continue;
+    // Add outstanding invoices to Cash In (by due date)
+    for (const inv of invoices) {
+      if (!inv.due_date || inv.type !== "ACCREC") continue;
       const monthKey = (inv.due_date as string).slice(0, 7);
       if (!months.includes(monthKey)) continue;
 
-      const isInflow = inv.type === "ACCREC";
-      const map = isInflow ? cashInMap : cashOutMap;
-      const code = inv.contact_name || "Other";
-      const name = inv.contact_name || "Other";
-
-      if (!map.has(code)) {
-        map.set(code, { name, months: new Map() });
+      const name = inv.contact_name || "Other Income";
+      if (!cashInMap.has(name)) {
+        cashInMap.set(name, { name, months: new Map() });
       }
-      const acc = map.get(code)!;
+      const acc = cashInMap.get(name)!;
       acc.months.set(monthKey, (acc.months.get(monthKey) || 0) + Number(inv.amount_due));
     }
 
-    // Convert maps to arrays and compute projections
-    function buildAccounts(map: AccountMonthMap): CashflowAccount[] {
+    // Add outstanding bills to Cash Out (by due date)
+    for (const inv of invoices) {
+      if (!inv.due_date || inv.type !== "ACCPAY") continue;
+      const monthKey = (inv.due_date as string).slice(0, 7);
+      if (!months.includes(monthKey)) continue;
+
+      const name = inv.contact_name || "Other Costs";
+      if (!cashOutMap.has(name)) {
+        cashOutMap.set(name, { name, months: new Map() });
+      }
+      const acc = cashOutMap.get(name)!;
+      acc.months.set(monthKey, (acc.months.get(monthKey) || 0) + Number(inv.amount_due));
+    }
+
+    // Build account arrays with projections
+    function buildAccounts(
+      map: AccountMap,
+      projectionStyle: "invoice" | "average"
+    ): CashflowAccount[] {
       const accounts: CashflowAccount[] = [];
 
       for (const [code, data] of map) {
         const monthly: number[] = [];
         const isProjected: boolean[] = [];
 
-        // Compute 3-month average from historical data for projections
-        const historicalMonths = months.slice(
-          Math.max(0, currentMonthIdx - historyForAvg),
-          currentMonthIdx
+        // 3-month historical average for projections
+        const avgMonths = months.slice(
+          Math.max(0, currentMonthIndex - historyForAvg),
+          currentMonthIndex
         );
-        const historicalValues = historicalMonths.map((m) => data.months.get(m) || 0);
+        const avgValues = avgMonths.map((m) => data.months.get(m) || 0);
         const avg =
-          historicalValues.length > 0
-            ? historicalValues.reduce((a, b) => a + b, 0) / historicalValues.length
+          avgValues.length > 0
+            ? avgValues.reduce((a, b) => a + b, 0) / avgValues.length
             : 0;
 
         for (let i = 0; i < months.length; i++) {
           const actual = data.months.get(months[i]);
-          if (i < currentMonthIdx) {
-            // Historical
-            monthly.push(Math.round((actual || 0) * 100) / 100);
+
+          if (i <= currentMonthIndex) {
+            // Historical or current month — use actuals
+            monthly.push(round(actual || 0));
             isProjected.push(false);
-          } else if (actual !== undefined) {
-            // Current/future with known data (invoices)
-            monthly.push(Math.round(actual * 100) / 100);
-            isProjected.push(i > currentMonthIdx);
+          } else if (actual !== undefined && actual > 0) {
+            // Future month with known data (invoices/bills)
+            monthly.push(round(actual));
+            isProjected.push(true);
+          } else if (projectionStyle === "average") {
+            // Cash Out: always project from 3-month average
+            monthly.push(round(avg));
+            isProjected.push(true);
           } else {
-            // Future projection based on average
-            monthly.push(Math.round(avg * 100) / 100);
+            // Cash In: only show known invoices, no average fill
+            monthly.push(round(actual || 0));
             isProjected.push(true);
           }
         }
 
-        // Only include accounts that have at least some activity
         if (monthly.some((v) => v !== 0)) {
           accounts.push({
             accountCode: code,
@@ -150,51 +178,80 @@ export async function GET(request: NextRequest) {
       return accounts;
     }
 
-    const cashIn = buildAccounts(cashInMap);
-    const cashOut = buildAccounts(cashOutMap);
+    // Cash In: invoice-based projections. Cash Out: 3-month average projections.
+    const cashIn = buildAccounts(cashInMap, "invoice");
+    const cashOut = buildAccounts(cashOutMap, "average");
 
-    // Compute opening/closing balances per month
+    // Compute balances and net cash movement
     const openingBalance: number[] = [];
     const closingBalance: number[] = [];
+    const netCashMovement: number[] = [];
 
-    let balance = currentBalance;
-    // Work backwards from current month to compute historical opening balances
-    const historicalBalances: number[] = new Array(months.length).fill(0);
-    historicalBalances[currentMonthIdx] = currentBalance;
+    const balances: number[] = new Array(months.length).fill(0);
+    balances[currentMonthIndex] = currentBalance;
 
-    // Go backwards
-    for (let i = currentMonthIdx - 1; i >= 0; i--) {
-      const monthInflows = cashIn.reduce((s, a) => s + a.monthly[i + 1], 0);
-      const monthOutflows = cashOut.reduce((s, a) => s + a.monthly[i + 1], 0);
-      historicalBalances[i] = historicalBalances[i + 1] - monthInflows + monthOutflows;
+    // Work backwards for historical months
+    for (let i = currentMonthIndex - 1; i >= 0; i--) {
+      const inflows = cashIn.reduce((s, a) => s + a.monthly[i + 1], 0);
+      const outflows = cashOut.reduce((s, a) => s + a.monthly[i + 1], 0);
+      balances[i] = balances[i + 1] - inflows + outflows;
     }
 
-    // Go forwards from current month
-    for (let i = currentMonthIdx + 1; i < months.length; i++) {
-      const monthInflows = cashIn.reduce((s, a) => s + a.monthly[i], 0);
-      const monthOutflows = cashOut.reduce((s, a) => s + a.monthly[i], 0);
-      historicalBalances[i] = historicalBalances[i - 1] + monthInflows - monthOutflows;
+    // Work forwards for projected months
+    for (let i = currentMonthIndex + 1; i < months.length; i++) {
+      const inflows = cashIn.reduce((s, a) => s + a.monthly[i], 0);
+      const outflows = cashOut.reduce((s, a) => s + a.monthly[i], 0);
+      balances[i] = balances[i - 1] + inflows - outflows;
     }
 
     for (let i = 0; i < months.length; i++) {
-      if (i === 0) {
-        openingBalance.push(Math.round(historicalBalances[i] * 100) / 100);
-      } else {
-        openingBalance.push(Math.round(historicalBalances[i - 1] * 100) / 100);
+      const inflows = cashIn.reduce((s, a) => s + a.monthly[i], 0);
+      const outflows = cashOut.reduce((s, a) => s + a.monthly[i], 0);
+      openingBalance.push(round(i === 0 ? balances[0] - inflows + outflows : balances[i - 1]));
+      closingBalance.push(round(balances[i]));
+      netCashMovement.push(round(inflows - outflows));
+    }
+
+    // "Falls below £0 in" — find first future month where closing < 0
+    let fallsBelowZeroIn: string | null = null;
+    for (let i = currentMonthIndex; i < months.length; i++) {
+      if (closingBalance[i] < 0) {
+        const monthsUntil = i - currentMonthIndex;
+        if (monthsUntil === 0) {
+          fallsBelowZeroIn = "This month";
+        } else if (monthsUntil === 1) {
+          fallsBelowZeroIn = "1 month";
+        } else {
+          fallsBelowZeroIn = `${monthsUntil} months`;
+        }
+        break;
       }
-      closingBalance.push(Math.round(historicalBalances[i] * 100) / 100);
+    }
+    // If we checked 12+ months and it never drops, say "2+ years" or null
+    if (!fallsBelowZeroIn && monthsForward >= 24) {
+      fallsBelowZeroIn = null; // never within range
+    } else if (!fallsBelowZeroIn) {
+      fallsBelowZeroIn = null;
     }
 
     const response: CashflowResponse = {
+      currentBalance: round(currentBalance),
+      fallsBelowZeroIn,
+      currentMonthIndex,
       months,
       cashIn,
       cashOut,
       openingBalance,
       closingBalance,
+      netCashMovement,
     };
 
     return json(response);
   } catch (err) {
     return handleError(err);
   }
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
 }

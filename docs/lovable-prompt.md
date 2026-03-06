@@ -1,64 +1,115 @@
-# Lovable Prompt
+# Lovable Prompt — Float-style Monthly Cash Flow
 
-Build a cash flow forecasting dashboard app. Single-page app feel, Vercel UI aesthetic — clean, minimal, lots of whitespace, sharp typography, dark/light mode.
+Rebuild the entire app as a single-page monthly cash flow view. Delete all existing pages (Dashboard, Transactions, Scenarios, Settings). Replace with one clean view matching the layout below.
 
-Use FLUX brand colours: [ADD YOUR HEX CODES]
-Use FLUX fonts: [ADD YOUR FONT NAMES]
+## Tech details
 
-The app connects to a backend API at [YOUR_RAILWAY_URL]. All data comes from API calls.
+- **API base URL**: `https://floaters.onrender.com`
+- **Auth**: Every API call must include header `Authorization: Bearer <API_KEY>`. Store the API key in a config/env variable. The user enters it once on first load (simple input + save to localStorage).
+- **Currency**: GBP (£). Format all numbers as `£12,527` — no decimals, use comma thousands separator. Negative values in red with minus sign: `-£1,253`.
+- **Single API call**: `GET /api/cashflow?back=3&forward=12` returns everything needed.
 
-## Pages
+## API Response Shape
 
-### 1. Dashboard (main view) — Cash flow forecast chart
-- **Two hero stat cards at the top, full width, side by side — these are the most prominent thing on the page:**
-  - **Balance** — large £ formatted number from `currentBalance`. This is how much money is in the bank right now.
-  - **Falls below £0 in** — from `fallsBelowZeroIn`. Shows e.g. "3 months", "< 1 month". If null, show "Never" in green. Red if under 3 months, amber if under 6 months, otherwise neutral.
-- Area/bar chart: inflows (green), outflows (red), running balance line
-- Period toggle: Daily / Weekly / Monthly
-- Time range: 30d, 90d, 6m, 1y, 3y
-- Scenario toggle chips above the chart (on/off switches)
-- Cash threshold shown as horizontal dashed red line
-- Click any bar/point to drill down to that day's transactions
-- Sync status badge: "Last synced 2h ago" + manual sync button
-- Currency: GBP (£)
+```typescript
+{
+  currentBalance: number        // today's total bank balance
+  fallsBelowZeroIn: string|null // "3 months", "This month", or null (never)
+  currentMonthIndex: number     // index into months[] for the current month
+  months: string[]              // ["2025-12", "2026-01", "2026-02", ...]
+  cashIn: CashflowAccount[]    // income accounts
+  cashOut: CashflowAccount[]   // expense accounts
+  openingBalance: number[]     // one per month
+  closingBalance: number[]     // one per month
+  netCashMovement: number[]    // one per month (cash in - cash out)
+}
 
-### 2. Transactions — Day-level drill-down
-- Table: Date, Type (in/out), Contact, Description, Amount, Status
-- Inline date picker to adjust expected payment date
-- Filter by type, status
+interface CashflowAccount {
+  accountCode: string
+  accountName: string
+  monthly: number[]      // one value per month
+  isProjected: boolean[] // true = projected/estimated, false = actual
+}
+```
 
-### 3. Scenarios — What-if planning
-- List of scenarios with active/inactive toggle
-- Create scenario: name, description
-- Add items: type (income/expense), amount, frequency (once/weekly/monthly/quarterly/yearly), start date, end date
+## Layout (top to bottom)
 
-### 4. Budgets — Budget vs actuals
-- Side-by-side bar chart per category per month
-- Variance column (£ and %)
+### 1. Header bar
+- App name "Floaters" on the left
+- "Sync Now" button on the right — calls `POST /api/sync` then refetches cashflow data
+- Show last sync time if available
 
-### 5. Settings
-- Connection status (org name, last sync)
-- Cash threshold input (minimum balance £)
-- Account grouping (drag accounts into groups)
-- Disconnect button
+### 2. Two headline stat cards (side by side, prominent)
 
-## API Endpoints
+**Left card — "Today's balance"**
+- Large £ formatted number from `currentBalance`
+- Subtitle: "Total across all bank accounts"
 
-All responses are JSON. Auth is handled via httpOnly cookie (set by /auth/callback).
+**Right card — "Drops below £0"**
+- Shows `fallsBelowZeroIn` value
+- If null: show "Never" in green
+- If value exists: show it. Red if under 3 months, amber if under 6, green otherwise
+- Subtitle: "Based on current projections"
 
-- `GET /api/connection` — connected org info + bank balances
-- `GET /api/sync-status` — last synced, status, errors
-- `POST /api/xero/sync` — trigger manual sync
-- `GET /api/forecast?period=daily&from=...&to=...&scenarios=id1,id2` — forecast data
-- `GET /api/forecast/transactions?date=2026-03-15` — day-level drill-down
-- `PATCH /api/adjustments/:id` — body: `{ "expected_payment_date": "2026-04-01" }`
-- `GET/POST /api/scenarios` — list / create scenarios
-- `GET/PATCH/DELETE /api/scenarios/:id` — read / update / delete scenario
-- `POST /api/scenarios/:id/items` — add scenario item
-- `PATCH/DELETE /api/scenarios/:id/items/:itemId` — edit / remove item
-- `GET/POST /api/budgets` — list / create budgets
-- `GET/PATCH/DELETE /api/budgets/:id` — read / update / delete budget
-- `POST /api/budgets/:id/lines` — add budget line
-- `GET /api/budgets/:id/comparison` — budget vs actuals data
-- `GET/POST/PATCH/DELETE /api/thresholds` — cash threshold (single per connection)
-- `GET/POST/PATCH/DELETE /api/account-groups` — account grouping
+### 3. Line chart — Ending balance by month
+- Single line showing `closingBalance` values across all months
+- X axis: month labels formatted as "Jan 26", "Feb 26", etc.
+- Y axis: £ values
+- Historical months (index < currentMonthIndex): solid line
+- Future months (index >= currentMonthIndex): dashed line
+- Hover tooltip showing "Ending balance — Mar 26: £13,424"
+- Current month marker/dot highlighted
+- Clean, minimal chart — no grid lines, light grey axis labels
+- Use Recharts or similar
+
+### 4. Cash flow table — THE MAIN EVENT
+
+This is a spreadsheet-style table. Horizontal scroll for months.
+
+**Columns**: One per month. Format month headers as "Jan 26", "Feb 26", "Mar 26" etc. Highlight the current month column (light blue background on header and cells).
+
+**Rows** (in this exact order):
+
+1. **Starting balance** — `openingBalance[]` values. Bold row, light grey background.
+
+2. **Income** section header row — show "↗ Income" with a collapse/expand toggle. When expanded, show child rows:
+   - One row per item in `cashIn[]`, showing `accountName` on left and `monthly[]` values across
+   - A **Total Income** summary row (sum of all cashIn monthly values per month). Semi-bold.
+
+3. **Costs** section header row — show "↘ Costs" with a collapse/expand toggle. When expanded, show child rows:
+   - One row per item in `cashOut[]`, showing `accountName` on left and `monthly[]` values across
+   - A **Total Costs** summary row (sum of all cashOut monthly values per month). Semi-bold.
+
+4. **Net cash movement** — `netCashMovement[]` values. Bold row. Negative values in red.
+
+5. **Ending balance** — `closingBalance[]` values. Bold row, light grey background.
+
+**Cell styling:**
+- Projected cells (where `isProjected[i]` is true): lighter/muted text colour (e.g. text-gray-400 instead of text-gray-900)
+- Actual cells: normal dark text
+- The account name column is fixed/sticky on the left (doesn't scroll with months)
+- All values right-aligned
+- Compact row height — this should feel like a spreadsheet, not a card layout
+
+### 5. No other pages
+
+Remove all navigation. This is a single view. No sidebar, no tabs, no router. Just this one page.
+
+## Styling
+
+- Clean, minimal, lots of whitespace
+- White background, subtle borders between rows (border-gray-100)
+- Font: system font stack, or Inter if available
+- Section headers (Income, Costs) slightly larger, with the arrow icon
+- The table should take up the full width of the viewport
+- Responsive: on mobile, the headline cards stack vertically, and the table scrolls horizontally
+- No dark mode needed for now
+
+## Important implementation notes
+
+- All data comes from ONE API call: `GET /api/cashflow?back=3&forward=12`
+- Handle loading state (skeleton/spinner while fetching)
+- Handle error state (show error message if API returns non-200)
+- Handle auth: if no API key in localStorage, show a simple "Enter your API key" input before loading anything
+- The "Sync Now" button should show a loading spinner while syncing, then refetch the cashflow data
+- Do NOT call any other API endpoints. Everything is in `/api/cashflow`.
