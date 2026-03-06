@@ -10,6 +10,9 @@ The app connects to a backend API at [YOUR_RAILWAY_URL]. All data comes from API
 ## Pages
 
 ### 1. Dashboard (main view) — Cash flow forecast chart
+- **Two hero stat cards at the top, full width, side by side — these are the most prominent thing on the page:**
+  - **Balance** — large £ formatted number from `currentBalance`. This is how much money is in the bank right now.
+  - **Falls below £0 in** — from `fallsBelowZeroIn`. Shows e.g. "3 months", "< 1 month". If null, show "Never" in green. Red if under 3 months, amber if under 6 months, otherwise neutral.
 - Area/bar chart: inflows (green), outflows (red), running balance line
 - Period toggle: Daily / Weekly / Monthly
 - Time range: 30d, 90d, 6m, 1y, 3y

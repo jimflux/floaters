@@ -23,6 +23,8 @@ export interface SyncStatusResponse {
 
 // GET /api/forecast
 export interface ForecastResponse {
+  currentBalance: number;
+  fallsBelowZeroIn: string | null;
   periods: ForecastPeriod[];
   threshold: number | null;
   thresholdBreachDate: string | null;
