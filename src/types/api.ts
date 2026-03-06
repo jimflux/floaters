@@ -117,6 +117,22 @@ export interface AccountGroup {
   color: string | null;
 }
 
+// GET /api/cashflow
+export interface CashflowResponse {
+  months: string[]; // ["2025-12", "2026-01", ...]
+  cashIn: CashflowAccount[];
+  cashOut: CashflowAccount[];
+  openingBalance: number[];
+  closingBalance: number[];
+}
+
+export interface CashflowAccount {
+  accountCode: string;
+  accountName: string;
+  monthly: number[]; // one per month, same order as months[]
+  isProjected: boolean[]; // true if the month is a projection
+}
+
 // Generic API error
 export interface ApiError {
   error: string;
