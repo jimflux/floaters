@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getClientCredentialsToken, getXeroConnections } from "@/lib/xero/auth";
 import { createSession } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
@@ -6,11 +6,17 @@ import { runSync } from "@/lib/xero/sync";
 
 /**
  * Custom Connection auth: no user redirect needed.
- * Requests a token via client_credentials, fetches the connected tenant,
- * stores the connection, creates a session, and triggers initial sync.
+ * Protected by CONNECT_SECRET query param to prevent unauthorized access.
+ * Usage: GET /auth/connect?secret=YOUR_CONNECT_SECRET
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const secret = searchParams.get("secret");
+
+    if (!secret || secret !== process.env.CONNECT_SECRET) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     // Get token via client credentials
     const tokens = await getClientCredentialsToken();
 

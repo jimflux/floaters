@@ -9,13 +9,17 @@ const ALLOWED_ORIGINS = [
 export function middleware(request: NextRequest) {
   const origin = request.headers.get("origin");
 
-  // Handle CORS preflight
+  const isAllowedOrigin = origin && ALLOWED_ORIGINS.includes(origin);
+
+  // Handle CORS preflight — reject unknown origins
   if (request.method === "OPTIONS") {
-    const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+    if (!isAllowedOrigin) {
+      return new NextResponse(null, { status: 403 });
+    }
     return new NextResponse(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": allowedOrigin,
+        "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Allow-Credentials": "true",
@@ -25,8 +29,8 @@ export function middleware(request: NextRequest) {
 
   const response = NextResponse.next();
 
-  // Add CORS headers to all API responses
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  // Add CORS headers only for allowed origins
+  if (isAllowedOrigin) {
     response.headers.set("Access-Control-Allow-Origin", origin);
     response.headers.set("Access-Control-Allow-Credentials", "true");
   }
