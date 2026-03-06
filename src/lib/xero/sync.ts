@@ -3,6 +3,39 @@ import { xeroRequest, xeroRequestPaginated } from "./client";
 import type { XeroInvoice, XeroBankTransaction, XeroAccount } from "@/types/xero";
 import { subMonths, formatISO } from "date-fns";
 
+/**
+ * Parse Xero's date format: "/Date(1234567890000+0000)/" or ISO string
+ * Returns ISO date string (yyyy-MM-dd) or null
+ */
+function parseXeroDate(value: string | undefined | null): string | null {
+  if (!value) return null;
+  // Match /Date(milliseconds+offset)/
+  const match = value.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
+  if (match) {
+    const ms = parseInt(match[1], 10);
+    const d = new Date(ms);
+    return d.toISOString().split("T")[0];
+  }
+  // Already an ISO string like "2024-01-15T00:00:00"
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().split("T")[0];
+}
+
+/**
+ * Parse Xero's datetime format to ISO timestamp
+ */
+function parseXeroDateTime(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const match = value.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
+  if (match) {
+    return new Date(parseInt(match[1], 10)).toISOString();
+  }
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
 export async function runSync(connectionId: string, isInitial = false) {
   // Mark sync as in progress
   await supabase
@@ -177,7 +210,13 @@ async function syncInvoices(
   );
 
   for (const inv of invoices) {
-    await supabase.from("xero_invoices").upsert(
+    const issueDate = parseXeroDate(inv.Date);
+    const dueDate = parseXeroDate(inv.DueDate);
+    if (!issueDate || !dueDate) {
+      console.warn(`Skipping invoice ${inv.InvoiceID}: invalid dates`, inv.Date, inv.DueDate);
+      continue;
+    }
+    const { error: upsertErr } = await supabase.from("xero_invoices").upsert(
       {
         connection_id: connectionId,
         xero_id: inv.InvoiceID,
@@ -189,14 +228,17 @@ async function syncInvoices(
         total: inv.Total,
         amount_due: inv.AmountDue,
         amount_paid: inv.AmountPaid || 0,
-        issue_date: inv.Date,
-        due_date: inv.DueDate,
-        fully_paid_on_date: inv.FullyPaidOnDate || null,
+        issue_date: issueDate,
+        due_date: dueDate,
+        fully_paid_on_date: parseXeroDate(inv.FullyPaidOnDate),
         line_items: inv.LineItems || null,
-        xero_updated_at: inv.UpdatedDateUTC,
+        xero_updated_at: parseXeroDateTime(inv.UpdatedDateUTC),
       },
       { onConflict: "connection_id,xero_id" }
     );
+    if (upsertErr) {
+      console.error(`Invoice upsert failed for ${inv.InvoiceID}:`, upsertErr.message);
+    }
   }
 
   return invoices.length;
@@ -219,7 +261,12 @@ async function syncBankTransactions(
   );
 
   for (const txn of transactions) {
-    await supabase.from("xero_bank_transactions").upsert(
+    const txnDate = parseXeroDate(txn.Date);
+    if (!txnDate) {
+      console.warn(`Skipping bank txn ${txn.BankTransactionID}: invalid date`, txn.Date);
+      continue;
+    }
+    const { error: upsertErr } = await supabase.from("xero_bank_transactions").upsert(
       {
         connection_id: connectionId,
         xero_id: txn.BankTransactionID,
@@ -228,13 +275,16 @@ async function syncBankTransactions(
         account_code: txn.BankAccount?.Code || null,
         account_name: txn.BankAccount?.Name || null,
         total: txn.Total,
-        date: txn.Date,
+        date: txnDate,
         status: txn.Status,
         is_reconciled: txn.IsReconciled,
-        xero_updated_at: txn.UpdatedDateUTC,
+        xero_updated_at: parseXeroDateTime(txn.UpdatedDateUTC),
       },
       { onConflict: "connection_id,xero_id" }
     );
+    if (upsertErr) {
+      console.error(`Bank txn upsert failed for ${txn.BankTransactionID}:`, upsertErr.message);
+    }
   }
 
   return transactions.length;
