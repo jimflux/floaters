@@ -128,6 +128,7 @@ export interface CashflowResponse {
   openingBalance: number[];
   closingBalance: number[];
   netCashMovement: number[];
+  accounts: CashflowAccountInfo[];
 }
 
 export interface CashflowAccount {
@@ -135,6 +136,14 @@ export interface CashflowAccount {
   accountName: string;
   monthly: number[]; // one per month, same order as months[]
   isProjected: boolean[]; // true if the month is a projection
+}
+
+export interface CashflowAccountInfo {
+  code: string;
+  name: string;
+  type: string; // REVENUE, SALES, DIRECTCOSTS, OVERHEADS, EXPENSE
+  section: "income" | "costs";
+  hidden: boolean;
 }
 
 // Generic API error

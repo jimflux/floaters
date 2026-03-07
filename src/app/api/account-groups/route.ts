@@ -5,14 +5,14 @@ import { z } from "zod/v4";
 
 const createSchema = z.object({
   name: z.string().min(1),
-  account_ids: z.array(z.string().uuid()),
+  accountCodes: z.array(z.string().min(1)),
   color: z.string().optional(),
 });
 
 const updateSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).optional(),
-  account_ids: z.array(z.string().uuid()).optional(),
+  accountCodes: z.array(z.string().min(1)).optional(),
   color: z.string().nullable().optional(),
 });
 
@@ -22,11 +22,19 @@ export async function GET() {
 
     const { data } = await supabase
       .from("account_groups")
-      .select("*")
+      .select("id, name, account_codes, color, created_at")
       .eq("connection_id", connectionId)
       .order("created_at", { ascending: true });
 
-    return json(data || []);
+    return json({
+      groups: (data || []).map((g) => ({
+        id: g.id,
+        name: g.name,
+        accountCodes: g.account_codes,
+        color: g.color,
+        createdAt: g.created_at,
+      })),
+    });
   } catch (err) {
     return handleError(err);
   }
@@ -38,14 +46,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const parsed = createSchema.safeParse(body);
-    if (!parsed.success) return error("name and account_ids are required", 400);
+    if (!parsed.success) return error("name and accountCodes are required", 400);
 
     const { data, error: dbError } = await supabase
       .from("account_groups")
       .insert({
         connection_id: connectionId,
         name: parsed.data.name,
-        account_ids: parsed.data.account_ids,
+        account_codes: parsed.data.accountCodes,
         color: parsed.data.color || null,
       })
       .select()
@@ -66,11 +74,15 @@ export async function PATCH(request: NextRequest) {
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) return error("id is required", 400);
 
-    const { id, ...updates } = parsed.data;
+    const updates: Record<string, unknown> = {};
+    if (parsed.data.name) updates.name = parsed.data.name;
+    if (parsed.data.accountCodes) updates.account_codes = parsed.data.accountCodes;
+    if (parsed.data.color !== undefined) updates.color = parsed.data.color;
+
     const { data, error: dbError } = await supabase
       .from("account_groups")
       .update(updates)
-      .eq("id", id)
+      .eq("id", parsed.data.id)
       .eq("connection_id", connectionId)
       .select()
       .single();

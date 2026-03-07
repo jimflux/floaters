@@ -278,6 +278,7 @@ async function syncBankTransactions(
         date: txnDate,
         status: txn.Status,
         is_reconciled: txn.IsReconciled,
+        line_items: txn.LineItems || null,
         xero_updated_at: parseXeroDateTime(txn.UpdatedDateUTC),
       },
       { onConflict: "connection_id,xero_id" }
