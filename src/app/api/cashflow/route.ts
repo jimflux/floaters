@@ -296,6 +296,18 @@ export async function GET(request: NextRequest) {
       return accounts;
     }
 
+    // Ensure accounts with overrides appear even if they have no transactions
+    for (const [code] of overrideLookup) {
+      const acc = accountLookup.get(code);
+      if (!acc) continue;
+      if (hiddenCodes.has(code)) continue;
+      const section = getSection(acc.type);
+      const map = section === "income" ? cashInMap : cashOutMap;
+      if (!map.has(code)) {
+        map.set(code, { name: acc.name, type: acc.type, months: new Map() });
+      }
+    }
+
     const cashIn = buildAccounts(cashInMap, "invoice");
     const cashOut = buildAccounts(cashOutMap, "average");
 
