@@ -9,7 +9,7 @@ import type {
 } from "@/types/api";
 
 const INCOME_TYPES = new Set(["REVENUE", "SALES"]);
-const COST_TYPES = new Set(["DIRECTCOSTS", "OVERHEADS", "EXPENSE", "FIXEDASSET", "CURRENTLIABILITY"]);
+const COST_TYPES = new Set(["DIRECTCOSTS", "OVERHEADS", "EXPENSE", "FIXED", "CURRLIAB", "EQUITY"]);
 
 interface LineItem {
   AccountCode: string;
@@ -74,8 +74,9 @@ export async function GET(request: NextRequest) {
           "DIRECTCOSTS",
           "OVERHEADS",
           "EXPENSE",
-          "FIXEDASSET",
-          "CURRENTLIABILITY",
+          "FIXED",
+          "CURRLIAB",
+          "EQUITY",
         ])
         .eq("status", "ACTIVE"),
       supabase
