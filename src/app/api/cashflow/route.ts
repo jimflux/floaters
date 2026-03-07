@@ -276,7 +276,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        if (monthly.some((v) => v !== 0)) {
+        if (monthly.some((v) => v !== 0) || accountOverrides?.size) {
           accounts.push({
             accountCode: code,
             accountName: data.name,
