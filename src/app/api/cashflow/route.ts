@@ -9,7 +9,7 @@ import type {
 } from "@/types/api";
 
 const INCOME_TYPES = new Set(["REVENUE", "SALES"]);
-const COST_TYPES = new Set(["DIRECTCOSTS", "OVERHEADS", "EXPENSE", "FIXED", "CURRLIAB", "EQUITY"]);
+// Everything that isn't income goes into costs
 
 interface LineItem {
   AccountCode: string;
@@ -68,16 +68,7 @@ export async function GET(request: NextRequest) {
         .from("xero_accounts")
         .select("code, name, type")
         .eq("connection_id", connectionId)
-        .in("type", [
-          "REVENUE",
-          "SALES",
-          "DIRECTCOSTS",
-          "OVERHEADS",
-          "EXPENSE",
-          "FIXED",
-          "CURRLIAB",
-          "EQUITY",
-        ])
+        .neq("type", "BANK")
         .eq("status", "ACTIVE"),
       supabase
         .from("hidden_accounts")
@@ -125,10 +116,8 @@ export async function GET(request: NextRequest) {
     // Determine section for an account type
     function getSection(
       accType: string
-    ): "income" | "costs" | null {
-      if (INCOME_TYPES.has(accType)) return "income";
-      if (COST_TYPES.has(accType)) return "costs";
-      return null;
+    ): "income" | "costs" {
+      return INCOME_TYPES.has(accType) ? "income" : "costs";
     }
 
     // Group by account code + month
@@ -168,7 +157,6 @@ export async function GET(request: NextRequest) {
           const acc = accountLookup.get(li.AccountCode);
           if (!acc) continue;
           const section = getSection(acc.type);
-          if (!section) continue;
           const map = section === "income" ? cashInMap : cashOutMap;
           addToMap(
             map,
@@ -205,7 +193,6 @@ export async function GET(request: NextRequest) {
           const acc = accountLookup.get(li.AccountCode);
           if (!acc) continue;
           const section = getSection(acc.type);
-          if (!section) continue;
           const map = section === "income" ? cashInMap : cashOutMap;
           addToMap(
             map,
