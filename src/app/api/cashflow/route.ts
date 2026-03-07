@@ -253,16 +253,16 @@ export async function GET(request: NextRequest) {
             monthly.push(round(actual || 0));
             isProjected.push(false);
             hasOverride.push(false);
-          } else if (override !== undefined) {
-            // Manual override takes priority for future months
-            monthly.push(round(override));
-            isProjected.push(true);
-            hasOverride.push(true);
           } else if (actual !== undefined && actual > 0) {
-            // Future month with known data (from invoices)
+            // Future month with known invoice data — invoice wins over override
             monthly.push(round(actual));
             isProjected.push(true);
             hasOverride.push(false);
+          } else if (override !== undefined) {
+            // Manual override when no invoice exists
+            monthly.push(round(override));
+            isProjected.push(true);
+            hasOverride.push(true);
           } else if (projectionStyle === "average") {
             // Costs: project from 3-month average
             monthly.push(round(avg));

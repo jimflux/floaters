@@ -60,6 +60,10 @@ export async function PUT(request: NextRequest) {
   }
 }
 
+export async function POST(request: NextRequest) {
+  return PUT(request);
+}
+
 export async function DELETE(request: NextRequest) {
   try {
     const connectionId = await requireConnection();
