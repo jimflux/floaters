@@ -9,7 +9,7 @@ import type {
 } from "@/types/api";
 
 const INCOME_TYPES = new Set(["REVENUE", "SALES"]);
-const COST_TYPES = new Set(["DIRECTCOSTS", "OVERHEADS", "EXPENSE"]);
+const COST_TYPES = new Set(["DIRECTCOSTS", "OVERHEADS", "EXPENSE", "FIXEDASSET", "CURRENTLIABILITY"]);
 
 interface LineItem {
   AccountCode: string;
@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       bankAccountResult,
       accountsResult,
       hiddenResult,
+      overrideResult,
     ] = await Promise.all([
       supabase
         .from("xero_bank_transactions")
@@ -73,11 +74,17 @@ export async function GET(request: NextRequest) {
           "DIRECTCOSTS",
           "OVERHEADS",
           "EXPENSE",
+          "FIXEDASSET",
+          "CURRENTLIABILITY",
         ])
         .eq("status", "ACTIVE"),
       supabase
         .from("hidden_accounts")
         .select("account_code")
+        .eq("connection_id", connectionId),
+      supabase
+        .from("projection_overrides")
+        .select("account_code, month, amount")
         .eq("connection_id", connectionId),
     ]);
 
@@ -88,6 +95,15 @@ export async function GET(request: NextRequest) {
     const hiddenCodes = new Set(
       (hiddenResult.data || []).map((r) => r.account_code)
     );
+
+    // Build override lookup: accountCode -> month -> amount
+    const overrideLookup = new Map<string, Map<string, number>>();
+    for (const o of overrideResult.data || []) {
+      if (!overrideLookup.has(o.account_code)) {
+        overrideLookup.set(o.account_code, new Map());
+      }
+      overrideLookup.get(o.account_code)!.set(o.month, Number(o.amount));
+    }
 
     const currentBalance = bankAccounts.reduce(
       (sum, a) => sum + (Number(a.current_balance) || 0),
@@ -226,6 +242,8 @@ export async function GET(request: NextRequest) {
 
         const monthly: number[] = [];
         const isProjected: boolean[] = [];
+        const hasOverride: boolean[] = [];
+        const accountOverrides = overrideLookup.get(code);
 
         // 3-month historical average for cost projections
         const avgMonths = months.slice(
@@ -240,23 +258,33 @@ export async function GET(request: NextRequest) {
 
         for (let i = 0; i < months.length; i++) {
           const actual = data.months.get(months[i]);
+          const override = accountOverrides?.get(months[i]);
 
           if (i <= currentMonthIndex) {
             // Historical or current month — actual data only
             monthly.push(round(actual || 0));
             isProjected.push(false);
+            hasOverride.push(false);
+          } else if (override !== undefined) {
+            // Manual override takes priority for future months
+            monthly.push(round(override));
+            isProjected.push(true);
+            hasOverride.push(true);
           } else if (actual !== undefined && actual > 0) {
             // Future month with known data (from invoices)
             monthly.push(round(actual));
             isProjected.push(true);
+            hasOverride.push(false);
           } else if (projectionStyle === "average") {
             // Costs: project from 3-month average
             monthly.push(round(avg));
             isProjected.push(true);
+            hasOverride.push(false);
           } else {
             // Income: only show known invoices
             monthly.push(round(actual || 0));
             isProjected.push(true);
+            hasOverride.push(false);
           }
         }
 
@@ -266,6 +294,7 @@ export async function GET(request: NextRequest) {
             accountName: data.name,
             monthly,
             isProjected,
+            hasOverride,
           });
         }
       }

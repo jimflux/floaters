@@ -25,7 +25,22 @@ interface CashflowAccountInfo {
 }
 ```
 
-The `cashIn` and `cashOut` arrays now use chart of accounts names (e.g. "Sales", "Rent") instead of bank account or contact names. No change to the shape — `accountCode`, `accountName`, `monthly[]`, `isProjected[]` are all the same.
+Each account in `cashIn` and `cashOut` now has a new field:
+
+```typescript
+interface CashflowAccount {
+  accountCode: string
+  accountName: string
+  monthly: number[]
+  isProjected: boolean[]
+  hasOverride: boolean[]   // NEW: true if the month has a manual projection override
+}
+```
+
+Three visual states per cell:
+- **Actual** (`isProjected: false`) — default styling, not editable
+- **Auto-projected** (`isProjected: true`, `hasOverride: false`) — italic or muted text, editable
+- **Manual override** (`isProjected: true`, `hasOverride: true`) — blue text with small indicator (pencil icon or dot), editable
 
 ### New API endpoints
 
@@ -34,6 +49,9 @@ The `cashIn` and `cashOut` arrays now use chart of accounts names (e.g. "Sales",
 - **Create group**: `POST /api/account-groups` with body `{ "name": "...", "accountCodes": ["200", "201"] }`
 - **List groups**: `GET /api/account-groups` returns `{ groups: [{ id, name, accountCodes, color, createdAt }] }`
 - **Delete group**: `DELETE /api/account-groups?id=XXX`
+- **Set projection override**: `PUT /api/projection-overrides` with body `{ "accountCode": "200-EDI", "month": "2026-04", "amount": 5000 }`
+- **Remove projection override**: `DELETE /api/projection-overrides?accountCode=200-EDI&month=2026-04`
+- **List all overrides**: `GET /api/projection-overrides` returns `{ overrides: [{ accountCode, month, amount }] }`
 
 ## Changes to make
 
@@ -63,6 +81,19 @@ Slide-over panel from the right, white background, shadow. Two tabs:
   - Submit calls `POST /api/account-groups` with `{ "name": "...", "accountCodes": ["200", "400"] }`
 - Groups are for future use — they don't change the table yet, just stored for later
 
-### 3. No other changes needed
+### 3. Editable projected cells (new)
 
-The table, chart, and headline cards should already work with the new data — the API shape for `cashIn`, `cashOut`, `openingBalance`, `closingBalance`, `netCashMovement` is unchanged. The account names will just be different (chart of accounts names instead of bank/contact names).
+Any cell in the table where `isProjected[i]` is true should be clickable/editable. This lets the user manually set projected amounts for future months.
+
+**Interaction:**
+- Clicking a projected cell opens an inline input or small popover with a number field, pre-filled with the current value
+- On save: call `PUT /api/projection-overrides` with `{ "accountCode": "...", "month": "2026-04", "amount": 5000 }`, then refetch `/api/cashflow`
+- On clear/reset (small "x" or "reset" button): call `DELETE /api/projection-overrides?accountCode=...&month=2026-04`, then refetch `/api/cashflow` — this reverts to the default projection (3-month average for costs, or invoice-only for income)
+
+**Visual states:**
+- Cells where `hasOverride[i]` is true should have a distinct style (e.g. blue text, small pencil icon) so the user can see which values they've manually set
+- Cells where `isProjected[i]` is true but `hasOverride[i]` is false should look subtly different from actuals (e.g. italic or slightly muted) to show they're auto-projected
+
+### 4. No other changes needed
+
+The chart and headline cards should already work with the data. The account names are chart of accounts names.

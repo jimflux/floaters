@@ -136,14 +136,26 @@ export interface CashflowAccount {
   accountName: string;
   monthly: number[]; // one per month, same order as months[]
   isProjected: boolean[]; // true if the month is a projection
+  hasOverride: boolean[]; // true if the month has a manual projection override
 }
 
 export interface CashflowAccountInfo {
   code: string;
   name: string;
-  type: string; // REVENUE, SALES, DIRECTCOSTS, OVERHEADS, EXPENSE
+  type: string; // REVENUE, SALES, DIRECTCOSTS, OVERHEADS, EXPENSE, FIXEDASSET, CURRENTLIABILITY
   section: "income" | "costs";
   hidden: boolean;
+}
+
+// GET /api/projection-overrides
+export interface ProjectionOverride {
+  accountCode: string;
+  month: string; // "2026-04"
+  amount: number;
+}
+
+export interface ProjectionOverridesResponse {
+  overrides: ProjectionOverride[];
 }
 
 // Generic API error
