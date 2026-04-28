@@ -1,17 +1,32 @@
 import { NextResponse } from "next/server";
 
 const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL || "http://localhost:5173",
+  process.env.FRONTEND_URL,
+  "https://floaters.flux.am",
+  "https://flux-floaters.lovable.app",
+  "http://localhost:5173",
   "http://localhost:3000",
-].filter(Boolean);
+].filter(Boolean) as string[];
+
+const ALLOWED_ORIGIN_PATTERNS = [/^https:\/\/id-preview--.*\.lovable\.app$/];
+
+function resolveAllowedOrigin(origin: string | null): string | null {
+  if (!origin) return null;
+  if (ALLOWED_ORIGINS.includes(origin)) return origin;
+  if (ALLOWED_ORIGIN_PATTERNS.some((pattern) => pattern.test(origin))) {
+    return origin;
+  }
+  return null;
+}
 
 export function corsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  const allowedOrigin = resolveAllowedOrigin(origin) ?? ALLOWED_ORIGINS[0] ?? "http://localhost:5173";
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
     "Access-Control-Allow-Credentials": "true",
+    Vary: "Origin",
   };
 }
 
