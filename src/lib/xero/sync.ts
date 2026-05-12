@@ -171,7 +171,11 @@ async function syncAccounts(connectionId: string): Promise<number> {
               (a) => a.Value
             );
             if (accountIdAttr) {
-              const balance = parseFloat(row.Cells?.[1]?.Value || "0");
+              // BankSummary columns: [Account, Opening, CashReceived, CashSpent, Closing]
+              // Read the last cell (closing balance) for the current balance
+              const cells = row.Cells || [];
+              const closingCell = cells[cells.length - 1];
+              const balance = parseFloat(closingCell?.Value || "0");
               await supabase
                 .from("xero_accounts")
                 .update({ current_balance: balance })
