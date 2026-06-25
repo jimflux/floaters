@@ -8,7 +8,7 @@ import { subMonths, formatISO } from "date-fns";
 // reason a sync felt slow. Chunked to keep individual requests a sane size.
 const UPSERT_CHUNK = 500;
 
-async function chunkedUpsert(
+export async function chunkedUpsert(
   table: string,
   rows: Record<string, unknown>[],
   onConflict: string
@@ -30,7 +30,7 @@ async function chunkedUpsert(
  * Parse Xero's date format: "/Date(1234567890000+0000)/" or ISO string
  * Returns ISO date string (yyyy-MM-dd) or null
  */
-function parseXeroDate(value: string | undefined | null): string | null {
+export function parseXeroDate(value: string | undefined | null): string | null {
   if (!value) return null;
   // Match /Date(milliseconds+offset)/
   const match = value.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
@@ -48,7 +48,7 @@ function parseXeroDate(value: string | undefined | null): string | null {
 /**
  * Parse Xero's datetime format to ISO timestamp
  */
-function parseXeroDateTime(value: string | undefined | null): string | null {
+export function parseXeroDateTime(value: string | undefined | null): string | null {
   if (!value) return null;
   const match = value.match(/\/Date\((\d+)([+-]\d{4})?\)\//);
   if (match) {

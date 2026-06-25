@@ -307,7 +307,7 @@ export async function getDayTransactions(
   return transactions;
 }
 
-function getOccurrences(
+export function getOccurrences(
   frequency: string,
   startDate: string,
   endDate: string | null,
