@@ -84,9 +84,7 @@ export async function computeForecast(
       frequency: item.frequency,
       start_date: item.start_date,
       end_date: item.end_date,
-      scenario_name: (item as Record<string, unknown>).scenarios
-        ? ((item as Record<string, unknown>).scenarios as { name: string }).name
-        : "Scenario",
+      scenario_name: extractScenarioName(item.scenarios),
     }));
   }
 
@@ -300,9 +298,7 @@ export async function getDayTransactions(
           date,
           status: "scenario",
           expectedPaymentDate: null,
-          scenarioName: (item as Record<string, unknown>).scenarios
-            ? ((item as Record<string, unknown>).scenarios as { name: string }).name
-            : "Scenario",
+          scenarioName: extractScenarioName(item.scenarios),
         });
       }
     }
@@ -360,4 +356,15 @@ function getOccurrences(
 
 function round(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// PostgREST embeds a to-one join (`scenarios!inner(name)`) as either an object
+// or a single-element array depending on version — normalise both to the name.
+function extractScenarioName(scenarios: unknown): string {
+  const row = Array.isArray(scenarios) ? scenarios[0] : scenarios;
+  if (row && typeof row === "object" && "name" in row) {
+    const name = (row as { name?: unknown }).name;
+    if (typeof name === "string" && name) return name;
+  }
+  return "Scenario";
 }

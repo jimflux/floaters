@@ -1,12 +1,13 @@
 import type { ForecastPeriod, DayTransaction } from "./forecast";
 
-// Cashflow + override contract is shared with the web and MCP apps.
+// Cashflow + override + account-group contract is shared with the web and MCP apps.
 export type {
   CashflowAccount,
   CashflowAccountInfo,
   CashflowResponse,
   ProjectionOverride,
   ProjectionOverridesResponse,
+  AccountGroup,
 } from "@floaters/types";
 
 // GET /api/connection
@@ -118,16 +119,10 @@ export interface CashThreshold {
   alertEmail: boolean;
 }
 
-// Account Groups
-export interface AccountGroup {
-  id: string;
-  name: string;
-  accountIds: string[];
-  color: string | null;
-}
-
-// CashflowResponse, CashflowAccount, CashflowAccountInfo, ProjectionOverride and
-// ProjectionOverridesResponse are re-exported from @floaters/types at the top of this file.
+// AccountGroup, CashflowResponse, CashflowAccount, CashflowAccountInfo,
+// ProjectionOverride and ProjectionOverridesResponse are re-exported from
+// @floaters/types at the top of this file (account groups key on Xero account
+// codes — `accountCodes` — not the old `accountIds` uuid column).
 
 // Generic API error
 export interface ApiError {
