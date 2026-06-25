@@ -1,5 +1,14 @@
 import type { ForecastPeriod, DayTransaction } from "./forecast";
 
+// Cashflow + override contract is shared with the web and MCP apps.
+export type {
+  CashflowAccount,
+  CashflowAccountInfo,
+  CashflowResponse,
+  ProjectionOverride,
+  ProjectionOverridesResponse,
+} from "@floaters/types";
+
 // GET /api/connection
 export interface ConnectionResponse {
   connected: boolean;
@@ -117,46 +126,8 @@ export interface AccountGroup {
   color: string | null;
 }
 
-// GET /api/cashflow
-export interface CashflowResponse {
-  currentBalance: number;
-  fallsBelowZeroIn: string | null;
-  currentMonthIndex: number;
-  months: string[]; // ["2025-12", "2026-01", ...]
-  cashIn: CashflowAccount[];
-  cashOut: CashflowAccount[];
-  openingBalance: number[];
-  closingBalance: number[];
-  netCashMovement: number[];
-  accounts: CashflowAccountInfo[];
-}
-
-export interface CashflowAccount {
-  accountCode: string;
-  accountName: string;
-  monthly: number[]; // one per month, same order as months[]
-  isProjected: boolean[]; // true if the month is a projection
-  hasOverride: boolean[]; // true if the month has a manual projection override
-}
-
-export interface CashflowAccountInfo {
-  code: string;
-  name: string;
-  type: string; // REVENUE, SALES, DIRECTCOSTS, OVERHEADS, EXPENSE, FIXEDASSET, CURRENTLIABILITY
-  section: "income" | "costs";
-  hidden: boolean;
-}
-
-// GET /api/projection-overrides
-export interface ProjectionOverride {
-  accountCode: string;
-  month: string; // "2026-04"
-  amount: number;
-}
-
-export interface ProjectionOverridesResponse {
-  overrides: ProjectionOverride[];
-}
+// CashflowResponse, CashflowAccount, CashflowAccountInfo, ProjectionOverride and
+// ProjectionOverridesResponse are re-exported from @floaters/types at the top of this file.
 
 // Generic API error
 export interface ApiError {

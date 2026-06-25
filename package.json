@@ -1,39 +1,29 @@
 {
-  "name": "floaters",
+  "name": "floaters-monorepo",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
+  "description": "Cash flow forecasting app (Float clone) — Xero-backed. API, web, and MCP server.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "dev:api": "npm run dev --workspace @floaters/api",
+    "dev:web": "npm run dev --workspace @floaters/web",
+    "build:api": "npm run build --workspace @floaters/api",
+    "build:web": "npm run build --workspace @floaters/web",
+    "build:mcp": "npm run build --workspace @floaters/mcp",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jimflux/floaters.git"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
-  "type": "module",
-  "bugs": {
-    "url": "https://github.com/jimflux/floaters/issues"
-  },
-  "homepage": "https://github.com/jimflux/floaters#readme",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.98.0",
-    "bottleneck": "^2.19.5",
-    "date-fns": "^4.1.0",
-    "jose": "^6.2.0",
-    "next": "^16.1.6",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@types/node": "^25.3.5",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3"
+  "overrides": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   }
 }

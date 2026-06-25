@@ -1,12 +1,11 @@
-# dependencies
-/node_modules
+# dependencies (root + every workspace)
+node_modules/
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
+# builds
+.next/
+out/
+build/
+dist/
 
 # misc
 .DS_Store
@@ -14,14 +13,15 @@
 
 # debug
 npm-debug.log*
+*.log
 
 # env files
 .env
 .env*.local
 
-# vercel
-.vercel
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# vercel
+.vercel

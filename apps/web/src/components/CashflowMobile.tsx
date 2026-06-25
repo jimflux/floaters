@@ -1,0 +1,276 @@
+import { useState, useRef } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { triggerSync } from '@/lib/api';
+import type { CashflowData, CashflowAccount } from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings } from 'lucide-react';
+import AccountManagementPanel from '@/components/AccountManagementPanel';
+import EditableCell from '@/components/EditableCell';
+import AlignedChart from '@/components/AlignedChart';
+
+function formatGBP(n: number): string {
+  const abs = Math.abs(Math.round(n));
+  const formatted = abs.toLocaleString('en-GB');
+  return n < 0 ? `-£${formatted}` : `£${formatted}`;
+}
+
+function formatMonthShort(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[parseInt(m, 10) - 1]} ${y.slice(2)}`;
+}
+
+function formatMonthLong(yyyymm: string): string {
+  const [y, m] = yyyymm.split('-');
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return `${months[parseInt(m, 10) - 1]} ${y}`;
+}
+
+function getZeroColor(value: string | null): string {
+  if (!value) return 'text-green-600';
+  const lower = value.toLowerCase();
+  if (lower === 'this month' || lower.includes('1 month') || lower.includes('2 month')) return 'text-red-600';
+  if (lower.includes('3 month') || lower.includes('4 month') || lower.includes('5 month')) return 'text-amber-600';
+  return 'text-green-600';
+}
+
+function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
+  return accounts.reduce((sum, a) => sum + (a.monthly[monthIndex] || 0), 0);
+}
+
+interface Props {
+  data: CashflowData;
+}
+
+export default function CashflowMobile({ data }: Props) {
+  const queryClient = useQueryClient();
+  const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, cashIn, cashOut, openingBalance, closingBalance, netCashMovement, accounts = [] } = data;
+
+  const [activeIdx, setActiveIdx] = useState(currentMonthIndex);
+  const [incomeOpen, setIncomeOpen] = useState(true);
+  const [costsOpen, setCostsOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+
+  const syncMutation = useMutation({
+    mutationFn: triggerSync,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+      toast.success('Sync complete');
+    },
+    onError: () => toast.error('Sync failed'),
+  });
+
+  const goPrev = () => setActiveIdx(i => Math.max(0, i - 1));
+  const goNext = () => setActiveIdx(i => Math.min(months.length - 1, i + 1));
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current == null || touchStartY.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0) goNext(); else goPrev();
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
+  const month = months[activeIdx];
+  const isProjected = activeIdx > currentMonthIndex;
+  const isCurrent = activeIdx === currentMonthIndex;
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      {/* Header */}
+      <header className="flex items-center justify-between px-3 h-12 border-b border-border bg-card">
+        <span className="font-semibold text-sm tracking-tight">Floaters</span>
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} title="Sync">
+            <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setSettingsOpen(true)} title="Settings">
+            <Settings className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => { document.cookie = 'app_unlocked=; max-age=0; path=/'; window.location.reload(); }} title="Lock">
+            <LogOut className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </header>
+
+      {/* Stat block */}
+      <div className="px-4 pt-4 pb-3 border-b border-border">
+        <p className="text-xs text-muted-foreground mb-0.5">Today's balance</p>
+        <p className="text-3xl font-bold tracking-tight tabular-nums">{formatGBP(currentBalance)}</p>
+        <div className="mt-2 flex items-baseline gap-2">
+          <span className="text-xs text-muted-foreground">Drops below £0:</span>
+          <span className={`text-sm font-semibold ${getZeroColor(fallsBelowZeroIn)}`}>{fallsBelowZeroIn || 'Never'}</span>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="px-2 py-3 border-b border-border">
+        <AlignedChart
+          months={months}
+          closingBalance={closingBalance}
+          currentMonthIndex={currentMonthIndex}
+          formatMonth={formatMonthShort}
+        />
+      </div>
+
+      {/* Month pager */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-card">
+        <button
+          onClick={goPrev}
+          disabled={activeIdx === 0}
+          className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent/50 disabled:opacity-30"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div className="flex flex-col items-center">
+          <span className="text-sm font-semibold tracking-tight">{formatMonthLong(month)}</span>
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+            {isCurrent ? 'Current' : isProjected ? 'Projected' : 'Actual'}
+          </span>
+        </div>
+        <button
+          onClick={goNext}
+          disabled={activeIdx === months.length - 1}
+          className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent/50 disabled:opacity-30"
+        >
+          <ChevR className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Dot indicator */}
+      <div className="flex items-center justify-center gap-1 py-2 border-b border-border bg-card overflow-x-auto">
+        {months.map((m, i) => (
+          <button
+            key={m}
+            onClick={() => setActiveIdx(i)}
+            className={`h-1.5 rounded-full transition-all shrink-0 ${
+              i === activeIdx ? 'w-4 bg-foreground' :
+              i === currentMonthIndex ? 'w-1.5 bg-foreground/60' :
+              'w-1.5 bg-foreground/20'
+            }`}
+            aria-label={formatMonthShort(m)}
+          />
+        ))}
+      </div>
+
+      {/* Month detail list */}
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="pb-8">
+        {/* Opening balance */}
+        <SummaryRowMobile label="Opening balance" value={openingBalance[activeIdx]} />
+
+        {/* Income */}
+        <SectionHeaderMobile
+          label="↗ Income"
+          total={sumMonthly(cashIn, activeIdx)}
+          open={incomeOpen}
+          onToggle={() => setIncomeOpen(!incomeOpen)}
+          accent="border-l-section-income"
+        />
+        {incomeOpen && cashIn.map((account, idx) => (
+          <AccountRowMobile
+            key={account.accountCode}
+            account={account}
+            monthIndex={activeIdx}
+            months={months}
+            currentMonthIndex={currentMonthIndex}
+            isAlt={idx % 2 === 1}
+          />
+        ))}
+
+        {/* Costs */}
+        <div className="h-2 bg-background" />
+        <SectionHeaderMobile
+          label="↘ Costs"
+          total={sumMonthly(cashOut, activeIdx)}
+          open={costsOpen}
+          onToggle={() => setCostsOpen(!costsOpen)}
+          accent="border-l-section-costs"
+        />
+        {costsOpen && cashOut.map((account, idx) => (
+          <AccountRowMobile
+            key={account.accountCode}
+            account={account}
+            monthIndex={activeIdx}
+            months={months}
+            currentMonthIndex={currentMonthIndex}
+            isAlt={idx % 2 === 1}
+          />
+        ))}
+
+        {/* Net + Ending */}
+        <SummaryRowMobile label="Net cash movement" value={netCashMovement[activeIdx]} bold colored />
+        <SummaryRowMobile label="Ending balance" value={closingBalance[activeIdx]} />
+      </div>
+
+      <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+    </div>
+  );
+}
+
+function SummaryRowMobile({ label, value, bold = true, colored = false }: {
+  label: string; value: number; bold?: boolean; colored?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-row-summary">
+      <span className={`text-xs ${bold ? 'font-semibold' : ''}`}>{label}</span>
+      <span className={`text-sm tabular-nums ${bold ? 'font-semibold' : ''} ${colored && value < 0 ? 'text-destructive' : ''}`}>
+        {formatGBP(value)}
+      </span>
+    </div>
+  );
+}
+
+function SectionHeaderMobile({ label, total, open, onToggle, accent }: {
+  label: string; total: number; open: boolean; onToggle: () => void; accent: string;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`w-full flex items-center justify-between px-4 py-3 border-b border-border bg-card hover:bg-muted/20 border-l-2 ${accent}`}
+    >
+      <div className="flex items-center gap-1.5">
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="text-xs font-semibold">{label}</span>
+      </div>
+      <span className={`text-sm font-semibold tabular-nums ${total < 0 ? 'text-destructive' : ''}`}>
+        {formatGBP(total)}
+      </span>
+    </button>
+  );
+}
+
+function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAlt }: {
+  account: CashflowAccount; monthIndex: number; months: string[]; currentMonthIndex: number; isAlt: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${isAlt ? 'bg-row-alt' : ''}`}>
+      <span className="text-xs pl-3 truncate pr-3 flex-1">{account.accountName}</span>
+      <div className="shrink-0 min-w-[80px] text-right">
+        <EditableCell
+          value={account.monthly[monthIndex]}
+          accountCode={account.accountCode}
+          month={months[monthIndex]}
+          isProjected={account.isProjected[monthIndex]}
+          hasOverride={account.hasOverride?.[monthIndex] ?? false}
+          isCurrentMonth={monthIndex === currentMonthIndex}
+          isAltRow={isAlt}
+          previousValue={monthIndex > 0 ? account.monthly[monthIndex - 1] : undefined}
+          months={months}
+          monthIndex={monthIndex}
+          as="div"
+        />
+      </div>
+    </div>
+  );
+}
