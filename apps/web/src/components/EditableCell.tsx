@@ -43,67 +43,77 @@ export default function EditableCell({
     }
   }, [open, value]);
 
+  // Optimistically apply override amounts to specific month indices for this
+  // account, returning a snapshot so onError can roll back. The canonical
+  // react-query pattern: patch in onMutate (before the request), invalidate in
+  // onSettled. This makes the edit appear instantly and survive the refetch,
+  // instead of flickering back when a slow/stale refetch lands.
+  type MonthPatch = { index: number; amount: number };
+  const applyOptimisticOverride = async (patches: MonthPatch[]) => {
+    await queryClient.cancelQueries({ queryKey: ['cashflow'] });
+    const previous = queryClient.getQueryData<CashflowData>(['cashflow']);
+    queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
+      if (!old) return old;
+      const patchAccounts = (accounts: CashflowAccount[]) =>
+        accounts.map(a => {
+          if (a.accountCode !== accountCode) return a;
+          const monthly = [...a.monthly];
+          const hasOverride = [...(a.hasOverride || a.monthly.map(() => false))];
+          for (const { index, amount } of patches) {
+            if (index >= 0 && index < monthly.length) {
+              monthly[index] = amount;
+              hasOverride[index] = true;
+            }
+          }
+          return { ...a, monthly, hasOverride };
+        });
+      return { ...old, cashIn: patchAccounts(old.cashIn), cashOut: patchAccounts(old.cashOut) };
+    });
+    return { previous };
+  };
+
+  const rollback = (ctx: { previous?: CashflowData } | undefined) => {
+    if (ctx?.previous) queryClient.setQueryData(['cashflow'], ctx.previous);
+  };
+
+  const settle = () => { queryClient.invalidateQueries({ queryKey: ['cashflow'] }); };
+
   const saveMutation = useMutation({
     mutationFn: (amount: number) => setProjectionOverride(accountCode, month, amount),
-    onSuccess: (_data, amount) => {
-      // Optimistically patch the cached cashflow data so current-month overrides stick
-      queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
-        if (!old) return old;
-        const patchAccounts = (accounts: CashflowAccount[]) =>
-          accounts.map(a => {
-            if (a.accountCode !== accountCode) return a;
-            const monthIdx = old.months.indexOf(month);
-            if (monthIdx === -1) return a;
-            const monthly = [...a.monthly];
-            const hasOverride = [...(a.hasOverride || a.monthly.map(() => false))];
-            monthly[monthIdx] = amount;
-            hasOverride[monthIdx] = true;
-            return { ...a, monthly, hasOverride };
-          });
-        return { ...old, cashIn: patchAccounts(old.cashIn), cashOut: patchAccounts(old.cashOut) };
-      });
-      queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+    onMutate: (amount: number) => {
+      const monthIdx = queryClient.getQueryData<CashflowData>(['cashflow'])?.months.indexOf(month) ?? -1;
       setOpen(false);
-      toast.success('Override saved');
+      return applyOptimisticOverride([{ index: monthIdx, amount }]);
     },
-    onError: () => toast.error('Failed to save override'),
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to save override'); },
+    onSuccess: () => toast.success('Override saved'),
+    onSettled: settle,
   });
 
   const fillForwardMutation = useMutation({
     mutationFn: (amount: number) => Promise.all(
       months.slice(monthIndex).map(targetMonth => setProjectionOverride(accountCode, targetMonth, amount))
     ),
-    onSuccess: (_data, amount) => {
-      queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
-        if (!old) return old;
-        const patchAccounts = (accounts: CashflowAccount[]) =>
-          accounts.map(a => {
-            if (a.accountCode !== accountCode) return a;
-            const monthly = [...a.monthly];
-            const hasOverride = [...(a.hasOverride || a.monthly.map(() => false))];
-            for (let i = monthIndex; i < old.months.length; i += 1) {
-              monthly[i] = amount;
-              hasOverride[i] = true;
-            }
-            return { ...a, monthly, hasOverride };
-          });
-        return { ...old, cashIn: patchAccounts(old.cashIn), cashOut: patchAccounts(old.cashOut) };
-      });
-      queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+    onMutate: (amount: number) => {
+      const total = queryClient.getQueryData<CashflowData>(['cashflow'])?.months.length ?? months.length;
+      const patches: MonthPatch[] = [];
+      for (let i = monthIndex; i < total; i += 1) patches.push({ index: i, amount });
       setOpen(false);
-      toast.success('Copied across future months');
+      return applyOptimisticOverride(patches);
     },
-    onError: () => toast.error('Failed to copy across months'),
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to copy across months'); },
+    onSuccess: () => toast.success('Copied across future months'),
+    onSettled: settle,
   });
 
+  // Reset reverts to the server's auto-projection (3-month average / invoice-only),
+  // which we can't compute client-side — so we just refetch on settle.
   const resetMutation = useMutation({
     mutationFn: () => removeProjectionOverride(accountCode, month),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['cashflow'] });
-      setOpen(false);
-      toast.success('Override removed');
-    },
+    onMutate: () => { setOpen(false); },
     onError: () => toast.error('Failed to remove override'),
+    onSuccess: () => toast.success('Override removed'),
+    onSettled: settle,
   });
 
   const handleSave = () => {
