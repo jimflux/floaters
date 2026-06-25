@@ -4,6 +4,9 @@
   "private": true,
   "description": "Cash flow forecasting app (Float clone) — Xero-backed. API, web, and MCP server.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
