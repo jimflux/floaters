@@ -1,12 +1,12 @@
 import type { CashflowData, AccountGroup } from './types';
 
-// Configured at build time via Vite env (.env). Falls back to the current
-// Render deployment so the app keeps working until VITE_API_URL is pointed at
-// Railway. NOTE: VITE_* values are embedded in the client bundle, so the API
-// key is effectively public — this is a single-user app, but don't treat it as
-// a secret.
-const API_BASE = import.meta.env.VITE_API_URL ?? 'https://floaters.onrender.com';
-const API_KEY = import.meta.env.VITE_API_KEY ?? 'c8659b9538ddc0bd800d04c5a18237b4';
+// The web app is served by the Next API itself (single service), so by default
+// it talks to the same origin — '' makes requests like `/api/cashflow` relative.
+// For local dev (vite on :8080, api on :3000) set VITE_API_URL=http://localhost:3000.
+// NOTE: VITE_* values are embedded in the client bundle, so the API key is
+// effectively public — this is a single-user app, but don't treat it as a secret.
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+const API_KEY = import.meta.env.VITE_API_KEY ?? '';
 
 const headers = { 'Authorization': `Bearer ${API_KEY}` };
 const jsonHeaders = { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' };
