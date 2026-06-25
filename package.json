@@ -15,7 +15,9 @@
     "build:web": "npm run build --workspace @floaters/web",
     "build:mcp": "npm run build --workspace @floaters/mcp",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "build": "npm run build:api",
+    "start": "npm run start --workspace @floaters/api"
   },
   "repository": {
     "type": "git",
