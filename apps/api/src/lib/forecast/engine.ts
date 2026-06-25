@@ -50,10 +50,12 @@ export async function computeForecast(
     0
   );
 
-  // 2. Get outstanding invoices (inflows)
+  // 2. Get outstanding invoices (inflows) — only the columns the projection uses
+  // (skip the heavy line_items jsonb the forecast never reads).
+  const FORECAST_COLS = "amount_due, due_date, expected_payment_date";
   const { data: invoices } = await supabase
     .from("xero_invoices")
-    .select("*")
+    .select(FORECAST_COLS)
     .eq("connection_id", connectionId)
     .eq("type", "ACCREC")
     .in("status", ["AUTHORISED", "SUBMITTED"]);
@@ -61,7 +63,7 @@ export async function computeForecast(
   // 3. Get outstanding bills (outflows)
   const { data: bills } = await supabase
     .from("xero_invoices")
-    .select("*")
+    .select(FORECAST_COLS)
     .eq("connection_id", connectionId)
     .eq("type", "ACCPAY")
     .in("status", ["AUTHORISED", "SUBMITTED"]);
@@ -229,7 +231,7 @@ export async function getDayTransactions(
   // Invoices due on this date
   const { data: invoices } = await supabase
     .from("xero_invoices")
-    .select("*")
+    .select("id, contact_name, amount_due, status, expected_payment_date")
     .eq("connection_id", connectionId)
     .eq("type", "ACCREC")
     .in("status", ["AUTHORISED", "SUBMITTED"])
@@ -252,7 +254,7 @@ export async function getDayTransactions(
   // Bills due on this date
   const { data: bills } = await supabase
     .from("xero_invoices")
-    .select("*")
+    .select("id, contact_name, amount_due, status, expected_payment_date")
     .eq("connection_id", connectionId)
     .eq("type", "ACCPAY")
     .in("status", ["AUTHORISED", "SUBMITTED"])

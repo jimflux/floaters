@@ -3,6 +3,29 @@ import { xeroRequest, xeroRequestPaginated } from "./client";
 import type { XeroInvoice, XeroBankTransaction, XeroAccount } from "@/types/xero";
 import { subMonths, formatISO } from "date-fns";
 
+// Upsert rows in batches instead of one round-trip per row. A single sync can
+// touch hundreds of invoices/transactions; row-at-a-time upserts were the main
+// reason a sync felt slow. Chunked to keep individual requests a sane size.
+const UPSERT_CHUNK = 500;
+
+async function chunkedUpsert(
+  table: string,
+  rows: Record<string, unknown>[],
+  onConflict: string
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+    const chunk = rows.slice(i, i + UPSERT_CHUNK);
+    const { error } = await supabase.from(table).upsert(chunk, { onConflict });
+    if (error) {
+      console.error(
+        `Upsert into ${table} failed (chunk starting ${i}):`,
+        error.message
+      );
+      throw new Error(`Failed to upsert ${table}: ${error.message}`);
+    }
+  }
+}
+
 /**
  * Parse Xero's date format: "/Date(1234567890000+0000)/" or ISO string
  * Returns ISO date string (yyyy-MM-dd) or null
@@ -131,21 +154,20 @@ async function syncAccounts(connectionId: string): Promise<number> {
 
   const accounts = response.Accounts || [];
 
-  for (const account of accounts) {
-    await supabase.from("xero_accounts").upsert(
-      {
-        connection_id: connectionId,
-        xero_id: account.AccountID,
-        code: account.Code,
-        name: account.Name,
-        type: account.Type,
-        class: account.Class,
-        status: account.Status,
-        bank_account_type: account.BankAccountType || null,
-      },
-      { onConflict: "connection_id,xero_id" }
-    );
-  }
+  await chunkedUpsert(
+    "xero_accounts",
+    accounts.map((account) => ({
+      connection_id: connectionId,
+      xero_id: account.AccountID,
+      code: account.Code,
+      name: account.Name,
+      type: account.Type,
+      class: account.Class,
+      status: account.Status,
+      bank_account_type: account.BankAccountType || null,
+    })),
+    "connection_id,xero_id"
+  );
 
   // Fetch bank account balances separately
   try {
@@ -213,6 +235,7 @@ async function syncInvoices(
     params
   );
 
+  const rows: Record<string, unknown>[] = [];
   for (const inv of invoices) {
     const issueDate = parseXeroDate(inv.Date);
     const dueDate = parseXeroDate(inv.DueDate);
@@ -220,32 +243,27 @@ async function syncInvoices(
       console.warn(`Skipping invoice ${inv.InvoiceID}: invalid dates`, inv.Date, inv.DueDate);
       continue;
     }
-    const { error: upsertErr } = await supabase.from("xero_invoices").upsert(
-      {
-        connection_id: connectionId,
-        xero_id: inv.InvoiceID,
-        type: inv.Type,
-        contact_name: inv.Contact?.Name || null,
-        contact_id: inv.Contact?.ContactID || null,
-        status: inv.Status,
-        currency_code: inv.CurrencyCode || "GBP",
-        total: inv.Total,
-        amount_due: inv.AmountDue,
-        amount_paid: inv.AmountPaid || 0,
-        issue_date: issueDate,
-        due_date: dueDate,
-        fully_paid_on_date: parseXeroDate(inv.FullyPaidOnDate),
-        line_items: inv.LineItems || null,
-        xero_updated_at: parseXeroDateTime(inv.UpdatedDateUTC),
-      },
-      { onConflict: "connection_id,xero_id" }
-    );
-    if (upsertErr) {
-      console.error(`Invoice upsert failed for ${inv.InvoiceID}:`, upsertErr.message);
-    }
+    rows.push({
+      connection_id: connectionId,
+      xero_id: inv.InvoiceID,
+      type: inv.Type,
+      contact_name: inv.Contact?.Name || null,
+      contact_id: inv.Contact?.ContactID || null,
+      status: inv.Status,
+      currency_code: inv.CurrencyCode || "GBP",
+      total: inv.Total,
+      amount_due: inv.AmountDue,
+      amount_paid: inv.AmountPaid || 0,
+      issue_date: issueDate,
+      due_date: dueDate,
+      fully_paid_on_date: parseXeroDate(inv.FullyPaidOnDate),
+      line_items: inv.LineItems || null,
+      xero_updated_at: parseXeroDateTime(inv.UpdatedDateUTC),
+    });
   }
 
-  return invoices.length;
+  await chunkedUpsert("xero_invoices", rows, "connection_id,xero_id");
+  return rows.length;
 }
 
 async function syncBankTransactions(
@@ -264,33 +282,29 @@ async function syncBankTransactions(
     params
   );
 
+  const rows: Record<string, unknown>[] = [];
   for (const txn of transactions) {
     const txnDate = parseXeroDate(txn.Date);
     if (!txnDate) {
       console.warn(`Skipping bank txn ${txn.BankTransactionID}: invalid date`, txn.Date);
       continue;
     }
-    const { error: upsertErr } = await supabase.from("xero_bank_transactions").upsert(
-      {
-        connection_id: connectionId,
-        xero_id: txn.BankTransactionID,
-        type: txn.Type,
-        contact_name: txn.Contact?.Name || null,
-        account_code: txn.BankAccount?.Code || null,
-        account_name: txn.BankAccount?.Name || null,
-        total: txn.Total,
-        date: txnDate,
-        status: txn.Status,
-        is_reconciled: txn.IsReconciled,
-        line_items: txn.LineItems || null,
-        xero_updated_at: parseXeroDateTime(txn.UpdatedDateUTC),
-      },
-      { onConflict: "connection_id,xero_id" }
-    );
-    if (upsertErr) {
-      console.error(`Bank txn upsert failed for ${txn.BankTransactionID}:`, upsertErr.message);
-    }
+    rows.push({
+      connection_id: connectionId,
+      xero_id: txn.BankTransactionID,
+      type: txn.Type,
+      contact_name: txn.Contact?.Name || null,
+      account_code: txn.BankAccount?.Code || null,
+      account_name: txn.BankAccount?.Name || null,
+      total: txn.Total,
+      date: txnDate,
+      status: txn.Status,
+      is_reconciled: txn.IsReconciled,
+      line_items: txn.LineItems || null,
+      xero_updated_at: parseXeroDateTime(txn.UpdatedDateUTC),
+    });
   }
 
-  return transactions.length;
+  await chunkedUpsert("xero_bank_transactions", rows, "connection_id,xero_id");
+  return rows.length;
 }
