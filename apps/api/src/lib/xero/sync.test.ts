@@ -6,7 +6,8 @@ vi.mock("@/lib/supabase", () => ({
   supabase: { from: () => ({ upsert: upsertMock }) },
 }));
 
-import { parseXeroDate, parseXeroDateTime, chunkedUpsert } from "./sync";
+import { parseXeroDate, parseXeroDateTime, chunkedUpsert, mapInvoice, mapPayment } from "./sync";
+import type { XeroInvoice, XeroPayment } from "@/types/xero";
 
 describe("parseXeroDate", () => {
   it("parses Xero's /Date(ms+offset)/ format to a UTC yyyy-MM-dd", () => {
@@ -35,6 +36,77 @@ describe("parseXeroDateTime", () => {
   it("returns null for invalid input", () => {
     expect(parseXeroDateTime(null)).toBeNull();
     expect(parseXeroDateTime("garbage")).toBeNull();
+  });
+});
+
+describe("mapInvoice", () => {
+  const invoice: XeroInvoice = {
+    InvoiceID: "inv-1",
+    Type: "ACCREC",
+    Contact: { ContactID: "c-1", Name: "Acme" },
+    Status: "AUTHORISED",
+    CurrencyCode: "GBP",
+    Total: 1200,
+    AmountDue: 600,
+    AmountPaid: 600,
+    Date: "2026-05-01",
+    DueDate: "2026-06-01",
+    UpdatedDateUTC: "/Date(1750000000000)/",
+    LineItems: [
+      { Description: "Work", Quantity: 1, UnitAmount: 1000, AccountCode: "200", TaxType: "OUTPUT2", LineAmount: 1000 },
+    ],
+  };
+
+  it("maps core fields", () => {
+    const row = mapInvoice("conn", invoice)!;
+    expect(row.xero_id).toBe("inv-1");
+    expect(row.status).toBe("AUTHORISED");
+    expect(row.total).toBe(1200);
+    expect(row.amount_due).toBe(600);
+    expect(row.amount_paid).toBe(600);
+    expect(row.due_date).toBe("2026-06-01");
+  });
+
+  it("never writes expected_payment_date (locally owned column)", () => {
+    const row = mapInvoice("conn", invoice)!;
+    expect(Object.keys(row)).not.toContain("expected_payment_date");
+  });
+
+  it("returns null on unparseable dates", () => {
+    expect(mapInvoice("conn", { ...invoice, DueDate: "garbage" })).toBeNull();
+  });
+});
+
+describe("mapPayment", () => {
+  const payment: XeroPayment = {
+    PaymentID: "pay-1",
+    PaymentType: "ACCRECPAYMENT",
+    Status: "AUTHORISED",
+    Amount: 600,
+    Date: "2026-05-15",
+    UpdatedDateUTC: "/Date(1750000000000)/",
+    Invoice: { InvoiceID: "inv-1", Type: "ACCREC" },
+  };
+
+  it("maps an invoice payment to a row", () => {
+    const row = mapPayment("conn", payment)!;
+    expect(row).toMatchObject({
+      connection_id: "conn",
+      xero_id: "pay-1",
+      invoice_xero_id: "inv-1",
+      payment_type: "ACCRECPAYMENT",
+      status: "AUTHORISED",
+      amount: 600,
+      date: "2026-05-15",
+    });
+  });
+
+  it("skips payments with no linked invoice (credit note refunds etc.)", () => {
+    expect(mapPayment("conn", { ...payment, Invoice: undefined })).toBeNull();
+  });
+
+  it("skips payments with unparseable dates", () => {
+    expect(mapPayment("conn", { ...payment, Date: "garbage" })).toBeNull();
   });
 });
 
