@@ -25,11 +25,15 @@ interface EditableCellProps {
   previousValue?: number;
   months: string[];
   monthIndex: number;
+  // The stored override amount. The displayed value can be a blend (current
+  // month: cash-to-date + remainder), so editing must seed from the raw
+  // override or an open-then-save would silently ratchet it up.
+  overrideAmount?: number;
   as?: 'td' | 'div';
 }
 
 export default function EditableCell({
-  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, as = 'td',
+  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, overrideAmount, as = 'td',
 }: EditableCellProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -38,10 +42,11 @@ export default function EditableCell({
 
   useEffect(() => {
     if (open) {
-      setInputValue(String(Math.round(value)));
+      const seed = hasOverride && overrideAmount !== undefined ? overrideAmount : value;
+      setInputValue(String(Math.round(seed)));
       setTimeout(() => inputRef.current?.select(), 50);
     }
-  }, [open, value]);
+  }, [open, value, hasOverride, overrideAmount]);
 
   // Optimistically apply override amounts to specific month indices for this
   // account, returning a snapshot so onError can roll back. The canonical
@@ -76,7 +81,10 @@ export default function EditableCell({
     if (ctx?.previous) queryClient.setQueryData(['cashflow'], ctx.previous);
   };
 
-  const settle = () => { queryClient.invalidateQueries({ queryKey: ['cashflow'] }); };
+  const settle = () => {
+    queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+    queryClient.invalidateQueries({ queryKey: ['projection-overrides'] });
+  };
 
   const saveMutation = useMutation({
     mutationFn: (amount: number) => setProjectionOverride(accountCode, month, amount),

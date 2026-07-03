@@ -41,9 +41,11 @@ function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
 
 interface Props {
   data: CashflowData;
+  // Raw override amounts keyed accountCode|month (see CashflowPage)
+  overrideAmounts?: Map<string, number>;
 }
 
-export default function CashflowMobile({ data }: Props) {
+export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
   const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, cashIn, cashOut, openingBalance, closingBalance, netCashMovement, accounts = [] } = data;
 
@@ -185,6 +187,7 @@ export default function CashflowMobile({ data }: Props) {
             months={months}
             currentMonthIndex={currentMonthIndex}
             isAlt={idx % 2 === 1}
+            overrideAmounts={overrideAmounts}
           />
         ))}
 
@@ -205,6 +208,7 @@ export default function CashflowMobile({ data }: Props) {
             months={months}
             currentMonthIndex={currentMonthIndex}
             isAlt={idx % 2 === 1}
+            overrideAmounts={overrideAmounts}
           />
         ))}
 
@@ -250,8 +254,8 @@ function SectionHeaderMobile({ label, total, open, onToggle, accent }: {
   );
 }
 
-function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAlt }: {
-  account: CashflowAccount; monthIndex: number; months: string[]; currentMonthIndex: number; isAlt: boolean;
+function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAlt, overrideAmounts }: {
+  account: CashflowAccount; monthIndex: number; months: string[]; currentMonthIndex: number; isAlt: boolean; overrideAmounts: Map<string, number>;
 }) {
   return (
     <div className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${isAlt ? 'bg-row-alt' : ''}`}>
@@ -268,6 +272,7 @@ function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAl
           previousValue={monthIndex > 0 ? account.monthly[monthIndex - 1] : undefined}
           months={months}
           monthIndex={monthIndex}
+          overrideAmount={overrideAmounts.get(`${account.accountCode}|${months[monthIndex]}`)}
           as="div"
         />
       </div>

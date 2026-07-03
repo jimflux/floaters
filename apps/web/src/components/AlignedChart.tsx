@@ -74,12 +74,13 @@ export default function AlignedChart({
     points.map(p => `L ${p.x} ${p.y}`).join(' ') +
     ` L ${svgWidth} ${PADDING_TOP + plotHeight} Z`;
 
-  // Historical line (0 to currentMonthIndex)
-  const histPoints = points.slice(0, currentMonthIndex + 1);
+  // Historical line ends at the previous month's closing: the current month's
+  // closing is a projected month-end, so it belongs to the dashed segment
+  const histPoints = points.slice(0, Math.max(currentMonthIndex, 1));
   const histLine = histPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
-  // Future line (currentMonthIndex onward)
-  const futPoints = points.slice(currentMonthIndex);
+  // Projected line (previous month's closing onward)
+  const futPoints = points.slice(Math.max(currentMonthIndex - 1, 0));
   const futLine = futPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
   const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {

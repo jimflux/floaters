@@ -32,15 +32,15 @@ server.registerTool(
   {
     title: "Get cash flow",
     description:
-      "Monthly cash-in and cash-out grouped by Xero chart-of-accounts, with opening/closing bank balances, net movement, and the month the balance is projected to fall below zero. Past months are actuals; future months are projections (3-month average for costs, outstanding invoices for income) plus any manual overrides.",
+      "Monthly cash-in and cash-out grouped by Xero chart-of-accounts, with opening/closing bank balances, net movement, and the month the balance is projected to fall below zero. Past months are pure cash actuals (bank transactions plus invoice payments); the current month blends cash-to-date with a projected remainder (its closing balance is a projected month-end); future months are projections (unpaid invoices by expected/due date with overdue rolled into the current month, manual overrides, 3-month average for costs). Note: get_forecast uses a separate engine that treats overdue invoices differently.",
     inputSchema: {
       monthsBack: z
         .number()
         .int()
         .min(0)
-        .max(24)
+        .max(12)
         .optional()
-        .describe("Historical months to include (default 3)."),
+        .describe("Historical months to include (default 3, max 12 — the synced history depth)."),
       monthsForward: z
         .number()
         .int()
@@ -83,7 +83,7 @@ server.registerTool(
   {
     title: "Get cash flow forecast",
     description:
-      "Day/week/month forecast periods with opening, inflows, outflows and closing balance over a date range, optionally overlaying what-if scenarios.",
+      "Day/week/month forecast periods with opening, inflows, outflows and closing balance over a date range, optionally overlaying what-if scenarios. Uses a separate engine from get_cashflow: overdue invoices are not rolled forward here, so the two can disagree about the current month.",
     inputSchema: {
       period: z
         .enum(["daily", "weekly", "monthly"])
