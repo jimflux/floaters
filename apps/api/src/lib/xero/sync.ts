@@ -254,18 +254,28 @@ export function mapInvoice(
   };
 }
 
+/**
+ * Build the invoice sync filter.
+ * Initial syncs exclude PAID/VOIDED/DELETED to bound volume. Incremental
+ * syncs must NOT exclude them: a status transition to PAID/VOIDED/DELETED is
+ * exactly the update we need, otherwise the local row stays "unpaid" forever
+ * and projects phantom cash.
+ */
+export function invoiceWhere(modifiedSince?: string): string {
+  if (modifiedSince) {
+    const d = new Date(modifiedSince);
+    return `UpdatedDateUTC>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
+  }
+  return 'Status!="PAID"&&Status!="VOIDED"&&Status!="DELETED"';
+}
+
 async function syncInvoices(
   connectionId: string,
   modifiedSince?: string
 ): Promise<number> {
   const params: Record<string, string> = {
-    where: 'Status!="PAID"&&Status!="VOIDED"&&Status!="DELETED"',
+    where: invoiceWhere(modifiedSince),
   };
-
-  if (modifiedSince) {
-    const d = new Date(modifiedSince);
-    params.where += `&&UpdatedDateUTC>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
-  }
 
   const invoices = await xeroRequestPaginated<XeroInvoice>(
     connectionId,
@@ -389,6 +399,23 @@ async function syncPayments(
   }
 
   return rows.length + backfilled;
+}
+
+/**
+ * One-off heal for rows synced before incremental sync included status
+ * transitions: re-fetch every locally-open invoice by ID so ones that went
+ * PAID/VOIDED/DELETED in Xero get their real status. Idempotent; safe to
+ * re-run (it only refreshes rows to Xero's current truth).
+ */
+export async function healInvoiceStatuses(connectionId: string): Promise<number> {
+  const { data } = await supabase
+    .from("xero_invoices")
+    .select("xero_id")
+    .eq("connection_id", connectionId)
+    .in("status", ["AUTHORISED", "SUBMITTED", "DRAFT"]);
+  const ids = (data || []).map((r) => r.xero_id as string);
+  if (ids.length === 0) return 0;
+  return fetchInvoicesByIds(connectionId, ids);
 }
 
 async function syncBankTransactions(

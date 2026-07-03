@@ -6,7 +6,7 @@ vi.mock("@/lib/supabase", () => ({
   supabase: { from: () => ({ upsert: upsertMock }) },
 }));
 
-import { parseXeroDate, parseXeroDateTime, chunkedUpsert, mapInvoice, mapPayment } from "./sync";
+import { parseXeroDate, parseXeroDateTime, chunkedUpsert, mapInvoice, mapPayment, invoiceWhere } from "./sync";
 import type { XeroInvoice, XeroPayment } from "@/types/xero";
 
 describe("parseXeroDate", () => {
@@ -36,6 +36,18 @@ describe("parseXeroDateTime", () => {
   it("returns null for invalid input", () => {
     expect(parseXeroDateTime(null)).toBeNull();
     expect(parseXeroDateTime("garbage")).toBeNull();
+  });
+});
+
+describe("invoiceWhere", () => {
+  it("initial sync excludes PAID/VOIDED/DELETED to bound volume", () => {
+    expect(invoiceWhere()).toBe('Status!="PAID"&&Status!="VOIDED"&&Status!="DELETED"');
+  });
+
+  it("incremental sync has no status exclusions, only the UpdatedDateUTC bound", () => {
+    const where = invoiceWhere("2026-06-15T10:00:00.000Z");
+    expect(where).toMatch(/^UpdatedDateUTC>=DateTime\(2026,6,1[45]\)$/);
+    expect(where).not.toContain("Status");
   });
 });
 
