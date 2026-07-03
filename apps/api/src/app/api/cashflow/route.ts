@@ -29,12 +29,6 @@ interface LineItem {
   Description?: string;
 }
 
-// Prorate a document's line items so their contributions sum to the cash that
-// actually moves (line amounts are tax-exclusive; totals are tax-inclusive).
-function lineShares(lineItems: LineItem[]): { sum: number } {
-  return { sum: lineItems.reduce((s, li) => s + li.LineAmount, 0) };
-}
-
 export async function GET(request: NextRequest) {
   try {
     const connectionId = await requireConnection();
@@ -244,29 +238,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Actual cash: bank transactions (spend/receive money)
-    for (const txn of bankTxns) {
-      const status = (txn.status as string) || "";
-      const type = (txn.type as string) || "";
-      if (status === "DELETED") continue;
-      // Transfers between own accounts move no net cash
-      if (type.endsWith("-TRANSFER")) continue;
-      const dir = type.startsWith("RECEIVE") ? 1 : -1;
-      const monthKey = (txn.date as string).slice(0, 7);
-      const total = Number(txn.total) || 0;
-      const lineItems = (txn.line_items as LineItem[] | null) || [];
-      const { sum } = lineShares(lineItems);
-
+    // Spread a document's cash across its line items — scaled so the shares
+    // sum to the tax-inclusive amount that actually moves (line amounts are
+    // tax-exclusive) — or into UNCATEGORISED when there are no usable lines.
+    // BANK-account lines are transfer legs between own accounts: no net cash.
+    function distribute(
+      add: typeof addActual,
+      monthKey: string,
+      dir: 1 | -1,
+      amount: number,
+      lineItems: LineItem[]
+    ) {
+      const sum = lineItems.reduce((s, li) => s + li.LineAmount, 0);
       if (lineItems.length > 0 && sum !== 0) {
-        const factor = total / sum;
         for (const li of lineItems) {
           const acc = accountLookup.get(li.AccountCode);
-          if (acc?.type === "BANK") continue; // transfer leg
-          const cash = dir * li.LineAmount * factor;
+          if (acc?.type === "BANK") continue;
+          const cash = dir * amount * (li.LineAmount / sum);
           if (acc) {
-            addActual(li.AccountCode, acc.name, acc.type, monthKey, cash);
+            add(li.AccountCode, acc.name, acc.type, monthKey, cash);
           } else {
-            addActual(
+            add(
               "UNCATEGORISED",
               "Uncategorised",
               dir > 0 ? "REVENUE" : "EXPENSE",
@@ -276,21 +268,33 @@ export async function GET(request: NextRequest) {
           }
         }
       } else {
-        addActual(
+        add(
           "UNCATEGORISED",
           "Uncategorised",
           dir > 0 ? "REVENUE" : "EXPENSE",
           monthKey,
-          dir * total
+          dir * amount
         );
       }
+    }
+
+    // Actual cash: bank transactions (spend/receive money)
+    for (const txn of bankTxns) {
+      const status = (txn.status as string) || "";
+      const type = (txn.type as string) || "";
+      if (status === "DELETED") continue;
+      // Transfers between own accounts move no net cash
+      if (type.endsWith("-TRANSFER")) continue;
+      const dir = type.startsWith("RECEIVE") ? 1 : -1;
+      const monthKey = (txn.date as string).slice(0, 7);
+      const lineItems = (txn.line_items as LineItem[] | null) || [];
+      distribute(addActual, monthKey, dir, Number(txn.total) || 0, lineItems);
     }
 
     // Actual cash: invoice payments, attributed via the invoice's line items
     for (const p of payments) {
       if ((p.status as string) === "DELETED") continue;
       const monthKey = (p.date as string).slice(0, 7);
-      const amount = Number(p.amount) || 0;
       const inv = invoiceById.get(p.invoice_xero_id as string);
       const dir =
         p.payment_type === "ACCRECPAYMENT"
@@ -303,35 +307,8 @@ export async function GET(request: NextRequest) {
                 ? -1
                 : 0;
       if (dir === 0) continue; // direction unknowable; never guess with money
-
       const lineItems = (inv?.line_items as LineItem[] | null) || [];
-      const { sum } = lineShares(lineItems);
-      if (lineItems.length > 0 && sum !== 0) {
-        for (const li of lineItems) {
-          const acc = accountLookup.get(li.AccountCode);
-          if (acc?.type === "BANK") continue;
-          const cash = dir * amount * (li.LineAmount / sum);
-          if (acc) {
-            addActual(li.AccountCode, acc.name, acc.type, monthKey, cash);
-          } else {
-            addActual(
-              "UNCATEGORISED",
-              "Uncategorised",
-              dir > 0 ? "REVENUE" : "EXPENSE",
-              monthKey,
-              cash
-            );
-          }
-        }
-      } else {
-        addActual(
-          "UNCATEGORISED",
-          "Uncategorised",
-          dir > 0 ? "REVENUE" : "EXPENSE",
-          monthKey,
-          dir * amount
-        );
-      }
+      distribute(addActual, monthKey, dir, Number(p.amount) || 0, lineItems);
     }
 
     // Projected cash: unpaid invoices at their remaining amount, bucketed at
@@ -352,33 +329,7 @@ export async function GET(request: NextRequest) {
 
       const dir = inv.type === "ACCREC" ? 1 : -1;
       const lineItems = (inv.line_items as LineItem[] | null) || [];
-      const { sum } = lineShares(lineItems);
-      if (lineItems.length > 0 && sum !== 0) {
-        for (const li of lineItems) {
-          const acc = accountLookup.get(li.AccountCode);
-          if (acc?.type === "BANK") continue;
-          const cash = dir * remaining * (li.LineAmount / sum);
-          if (acc) {
-            addProjected(li.AccountCode, acc.name, acc.type, projMonth, cash);
-          } else {
-            addProjected(
-              "UNCATEGORISED",
-              "Uncategorised",
-              dir > 0 ? "REVENUE" : "EXPENSE",
-              projMonth,
-              cash
-            );
-          }
-        }
-      } else {
-        addProjected(
-          "UNCATEGORISED",
-          "Uncategorised",
-          dir > 0 ? "REVENUE" : "EXPENSE",
-          projMonth,
-          dir * remaining
-        );
-      }
+      distribute(addProjected, projMonth, dir, remaining, lineItems);
     }
 
     // The last 3 calendar months before the current one, independent of the

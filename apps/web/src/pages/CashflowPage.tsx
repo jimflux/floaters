@@ -52,7 +52,7 @@ export default function CashflowPage() {
     queryKey: ['cashflow'],
     queryFn: async () => {
       const result = await getCashflow();
-      try { localStorage.setItem('cashflow_cache', JSON.stringify(result)); } catch {}
+      try { localStorage.setItem('cashflow_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
       return result;
     },
     initialData: () => {
