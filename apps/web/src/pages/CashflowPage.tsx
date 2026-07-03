@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCashflow, getProjectionOverrides, triggerSync, setProjectionOverride } from '@/lib/api';
+import { getCashflow, getProjectionOverrides, triggerSync, setProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
 import type { CashflowData, CashflowAccount, CashflowAccountInfo } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -65,10 +65,23 @@ export default function CashflowPage() {
   });
 
   // Raw override amounts, keyed accountCode|month, so editing a blended cell
-  // seeds from the stored override rather than the displayed value
-  const { data: overridesData } = useQuery({
+  // seeds from the stored override rather than the displayed value. Warm-started
+  // from localStorage like the cashflow query: a cached grid paints instantly,
+  // and the pre-fill protection must not lag behind it.
+  const { data: overridesData } = useQuery<{ overrides: ProjectionOverrideEntry[] }>({
     queryKey: ['projection-overrides'],
-    queryFn: getProjectionOverrides,
+    queryFn: async () => {
+      const result = await getProjectionOverrides();
+      try { localStorage.setItem('projection_overrides_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
+      return result;
+    },
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem('projection_overrides_cache');
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
+    },
+    initialDataUpdatedAt: 0, // always refetch in background
   });
   const overrideAmounts = new Map<string, number>();
   for (const o of overridesData?.overrides ?? []) {

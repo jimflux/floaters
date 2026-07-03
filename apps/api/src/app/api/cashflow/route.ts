@@ -250,7 +250,8 @@ export async function GET(request: NextRequest) {
       lineItems: LineItem[]
     ) {
       const sum = lineItems.reduce((s, li) => s + li.LineAmount, 0);
-      if (lineItems.length > 0 && sum !== 0) {
+      // Epsilon, not !== 0: lines cancelling to float noise must not divide
+      if (lineItems.length > 0 && Math.abs(sum) > 0.005) {
         for (const li of lineItems) {
           const acc = accountLookup.get(li.AccountCode);
           if (acc?.type === "BANK") continue;
@@ -278,6 +279,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Post-dated cash has not hit the bank yet: treat it as expected, not
+    // banked. `now` above is startOfMonth, so take today's date afresh.
+    const today = format(new Date(), "yyyy-MM-dd");
+
     // Actual cash: bank transactions (spend/receive money)
     for (const txn of bankTxns) {
       const status = (txn.status as string) || "";
@@ -288,7 +293,8 @@ export async function GET(request: NextRequest) {
       const dir = type.startsWith("RECEIVE") ? 1 : -1;
       const monthKey = (txn.date as string).slice(0, 7);
       const lineItems = (txn.line_items as LineItem[] | null) || [];
-      distribute(addActual, monthKey, dir, Number(txn.total) || 0, lineItems);
+      const add = (txn.date as string) > today ? addProjected : addActual;
+      distribute(add, monthKey, dir, Number(txn.total) || 0, lineItems);
     }
 
     // Actual cash: invoice payments, attributed via the invoice's line items
@@ -308,7 +314,8 @@ export async function GET(request: NextRequest) {
                 : 0;
       if (dir === 0) continue; // direction unknowable; never guess with money
       const lineItems = (inv?.line_items as LineItem[] | null) || [];
-      distribute(addActual, monthKey, dir, Number(p.amount) || 0, lineItems);
+      const add = (p.date as string) > today ? addProjected : addActual;
+      distribute(add, monthKey, dir, Number(p.amount) || 0, lineItems);
     }
 
     // Projected cash: unpaid invoices at their remaining amount, bucketed at

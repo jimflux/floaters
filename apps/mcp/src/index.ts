@@ -45,9 +45,9 @@ server.registerTool(
         .number()
         .int()
         .min(1)
-        .max(36)
+        .max(24)
         .optional()
-        .describe("Projected months to include (default 12)."),
+        .describe("Projected months to include (default 12, max 24)."),
     },
   },
   async ({ monthsBack, monthsForward }) => {

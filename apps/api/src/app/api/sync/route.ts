@@ -2,6 +2,12 @@ import { requireConnection, json, handleError } from "@/lib/api-helpers";
 import { runSync, healInvoiceStatuses } from "@/lib/xero/sync";
 import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
+import { z } from "zod/v4";
+
+const flagsSchema = z.object({
+  full: z.boolean().optional(),
+  heal: z.boolean().optional(),
+});
 
 export async function GET() {
   try {
@@ -58,12 +64,11 @@ export async function POST(request: NextRequest) {
     // Optional flags: { full: true } forces a full re-sync, { heal: true }
     // re-fetches locally-open invoices by ID to pick up PAID/VOIDED/DELETED
     // transitions that predate incremental status syncing.
-    let flags: { full?: boolean; heal?: boolean } = {};
-    try {
-      flags = await request.json();
-    } catch {
-      // No body — routine sync
-    }
+    const body = await request.json().catch(() => ({}));
+    const parsed = flagsSchema.safeParse(body ?? {});
+    // Flags are optional conveniences, not user input — a malformed body
+    // just degrades to a routine sync rather than 400ing.
+    const flags = parsed.success ? parsed.data : {};
 
     const { data: conn } = await supabase
       .from("xero_connections")

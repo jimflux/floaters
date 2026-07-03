@@ -81,4 +81,15 @@ describe("POST /api/sync", () => {
     await POST(request());
     expect(healMock).not.toHaveBeenCalled();
   });
+
+  it("degrades to a routine sync when the body is JSON null", async () => {
+    await POST(request(null));
+    expect(runSyncMock).toHaveBeenCalledWith("conn", true);
+    expect(healMock).not.toHaveBeenCalled();
+  });
+
+  it("degrades to a routine sync when a flag has the wrong type", async () => {
+    await POST(request({ heal: "true" }));
+    expect(healMock).not.toHaveBeenCalled();
+  });
 });

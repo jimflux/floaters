@@ -63,6 +63,11 @@ export function parseXeroDateTime(value: string | undefined | null): string | nu
   return d.toISOString();
 }
 
+// Xero where-clause date literal (local calendar day, matching Xero's own behaviour)
+export function xeroDateFilter(d: Date): string {
+  return `DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
+}
+
 export async function runSync(connectionId: string, isInitial = false) {
   // Mark sync as in progress
   await supabase
@@ -263,8 +268,7 @@ export function mapInvoice(
  */
 export function invoiceWhere(modifiedSince?: string): string {
   if (modifiedSince) {
-    const d = new Date(modifiedSince);
-    return `UpdatedDateUTC>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
+    return `UpdatedDateUTC>=${xeroDateFilter(new Date(modifiedSince))}`;
   }
   return 'Status!="PAID"&&Status!="VOIDED"&&Status!="DELETED"';
 }
@@ -350,19 +354,29 @@ export async function fetchInvoicesByIds(
   return count;
 }
 
-async function syncPayments(
+export async function syncPayments(
   connectionId: string,
   modifiedSince?: string
 ): Promise<number> {
+  // Existing connections predate the payments table, so the first sync after
+  // deploy must backfill history even though it runs incrementally.
+  let hasPayments = false;
+  if (modifiedSince) {
+    const { count } = await supabase
+      .from("xero_payments")
+      .select("*", { count: "exact", head: true })
+      .eq("connection_id", connectionId);
+    hasPayments = (count ?? 0) > 0;
+  }
+
   // Initial: bounded to the same window as bank transactions so history depth
   // is consistent. Incremental: everything updated since last sync.
   const params: Record<string, string> = {};
-  if (modifiedSince) {
-    const d = new Date(modifiedSince);
-    params.where = `UpdatedDateUTC>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
+  if (modifiedSince && hasPayments) {
+    params.where = `UpdatedDateUTC>=${xeroDateFilter(new Date(modifiedSince))}`;
   } else {
     const d = new Date(formatISO(subMonths(new Date(), HISTORY_MONTHS), { representation: "date" }));
-    params.where = `Date>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`;
+    params.where = `Date>=${xeroDateFilter(d)}`;
   }
 
   const payments = await xeroRequestPaginated<XeroPayment>(
@@ -422,9 +436,8 @@ async function syncBankTransactions(
   connectionId: string,
   since: string
 ): Promise<number> {
-  const d = new Date(since);
   const params: Record<string, string> = {
-    where: `Date>=DateTime(${d.getFullYear()},${d.getMonth() + 1},${d.getDate()})`,
+    where: `Date>=${xeroDateFilter(new Date(since))}`,
   };
 
   const transactions = await xeroRequestPaginated<XeroBankTransaction>(

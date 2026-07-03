@@ -267,6 +267,49 @@ describe("cash-basis history", () => {
     expect(res.netCashMovement[0]).toBe(0);
   });
 
+  it("falls back to the invoice type for direction when payment_type is missing", async () => {
+    state.invoices = [
+      {
+        xero_id: "inv-bill-paid",
+        type: "ACCPAY",
+        total: 200,
+        amount_due: 0,
+        due_date: "2026-05-01",
+        status: "PAID",
+        line_items: [{ AccountCode: "400", LineAmount: 200 }],
+      },
+    ];
+    state.payments = [
+      {
+        payment_type: null,
+        amount: 200,
+        date: "2026-05-12",
+        status: "AUTHORISED",
+        invoice_xero_id: "inv-bill-paid",
+      },
+    ];
+    const res = await run();
+    const advertising = res.cashOut.find((a) => a.accountCode === "400")!;
+    expect(advertising.monthly[0]).toBe(200);
+    expect(res.netCashMovement[0]).toBe(-200);
+  });
+
+  it("skips a payment whose direction is unknowable", async () => {
+    state.payments = [
+      {
+        payment_type: null,
+        amount: 200,
+        date: "2026-05-12",
+        status: "AUTHORISED",
+        invoice_xero_id: "inv-ghost", // matches no local invoice
+      },
+    ];
+    const res = await run();
+    expect(res.cashIn).toHaveLength(0);
+    expect(res.cashOut).toHaveLength(0);
+    expect(res.netCashMovement[0]).toBe(0);
+  });
+
   it("treats a SPEND transaction on a revenue account as reduced income", async () => {
     state.bankTxns = [
       {
@@ -315,6 +358,28 @@ describe("cash-basis history", () => {
     expect(uncat.monthly[0]).toBe(300);
   });
 
+  it("falls back to UNCATEGORISED when line amounts cancel to float noise", async () => {
+    state.bankTxns = [
+      {
+        type: "SPEND",
+        total: 300,
+        date: "2026-05-20",
+        status: "AUTHORISED",
+        // Sums to -7.1e-15 in floats, not zero: must not become a divisor
+        line_items: [
+          { AccountCode: "400", LineAmount: 10.1 },
+          { AccountCode: "400", LineAmount: 20.2 },
+          { AccountCode: "400", LineAmount: 30.3 },
+          { AccountCode: "400", LineAmount: -60.6 },
+        ],
+      },
+    ];
+    const res = await run();
+    const uncat = res.cashOut.find((a) => a.accountCode === "UNCATEGORISED")!;
+    expect(uncat.monthly[0]).toBe(300);
+    expect(res.cashOut.find((a) => a.accountCode === "400")).toBeUndefined();
+  });
+
   it("excludes transfers and DELETED bank transactions from every bucket", async () => {
     state.bankTxns = [
       { type: "RECEIVE-TRANSFER", total: 900, date: "2026-05-05", status: "AUTHORISED", line_items: [] },
@@ -350,6 +415,55 @@ describe("cash-basis history", () => {
     expect(res.cashOut.find((a) => a.accountCode === "090")).toBeUndefined();
     const uncat = res.cashOut.find((a) => a.accountCode === "UNCATEGORISED")!;
     expect(uncat.monthly[0]).toBe(200);
+  });
+});
+
+describe("post-dated cash", () => {
+  it("treats a post-dated bank transaction as expected cash, not banked", async () => {
+    state.bankTxns = [
+      {
+        type: "RECEIVE",
+        total: 500,
+        date: "2026-06-20", // after today (15 June)
+        status: "AUTHORISED",
+        line_items: [{ AccountCode: "200", LineAmount: 500 }],
+      },
+    ];
+    const res = await run();
+    const sales = res.cashIn.find((a) => a.accountCode === "200")!;
+    expect(sales.monthly[1]).toBe(500);
+    expect(sales.isProjected[1]).toBe(true);
+    // Today's balance does not include it, so nor must the anchor split
+    expect(res.openingBalance[1]).toBe(10000);
+    expect(res.closingBalance[1]).toBe(10500);
+  });
+
+  it("keeps a post-dated payment visible in its future month", async () => {
+    state.invoices = [
+      {
+        xero_id: "inv-post",
+        type: "ACCREC",
+        total: 300,
+        amount_due: 0,
+        due_date: "2026-06-01",
+        status: "PAID",
+        line_items: [{ AccountCode: "200", LineAmount: 300 }],
+      },
+    ];
+    state.payments = [
+      {
+        payment_type: "ACCRECPAYMENT",
+        amount: 300,
+        date: "2026-07-10",
+        status: "AUTHORISED",
+        invoice_xero_id: "inv-post",
+      },
+    ];
+    const res = await run();
+    const sales = res.cashIn.find((a) => a.accountCode === "200")!;
+    expect(sales.monthly[2]).toBe(300); // July: must not vanish
+    expect(sales.isProjected[2]).toBe(true);
+    expect(res.netCashMovement[2]).toBe(300);
   });
 });
 
