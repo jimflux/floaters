@@ -3,12 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCashflow, getProjectionOverrides, getPipeline, triggerSync, setProjectionOverride, CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY, type ProjectionOverrideEntry } from '@/lib/api';
 import type { CashflowData, CashflowAccount, CashflowAccountInfo, PipelineResponse } from '@/lib/types';
 import IncomeSection, { unreviewedByClientMonth } from '@/components/IncomeSection';
+import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus, Inbox } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
@@ -135,6 +136,15 @@ export default function CashflowPage() {
         <span className="font-semibold text-sm tracking-tight">Floaters</span>
         <div className="flex items-center gap-3">
           {lastSync && <span className="text-xs text-muted-foreground">Synced {formatTimeAgo(lastSync)}</span>}
+          <Button variant="outline" size="sm" className="relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
+            <Inbox className="h-3.5 w-3.5" />
+            <span className="ml-1.5">Pipeline</span>
+            {attentionCount(pipeline) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-medium flex items-center justify-center">
+                {attentionCount(pipeline)}
+              </span>
+            )}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
             <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
             <span className="ml-1.5">Sync Now</span>
@@ -234,6 +244,7 @@ export default function CashflowPage() {
       </div>
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+      <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
     </div>
   );
 }

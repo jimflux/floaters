@@ -28,18 +28,31 @@ export function projectionToApi(row: ProjectionRow) {
 const DEAD_STATUSES = new Set(["VOIDED", "DELETED"]);
 
 /**
- * R14: remainder = amount − Σ assigned invoices' total (VAT-inclusive),
- * excluding VOIDED/DELETED, floored at zero.
+ * R14: Σ assigned invoices' total (VAT-inclusive), excluding VOIDED/DELETED.
+ * Exposed separately so over-assignment (consumed > amount) stays visible
+ * even though the remainder floors at zero.
  */
-export function projectionRemainder(
-  amount: number,
+export function projectionConsumed(
   assigned: Array<{ status: string | null; total: number | string | null }>
 ): number {
   const consumed = assigned.reduce((sum, inv) => {
     if (inv.status && DEAD_STATUSES.has(inv.status)) return sum;
     return sum + Number(inv.total ?? 0);
   }, 0);
-  return Math.max(0, Math.round((amount - consumed) * 100) / 100);
+  return Math.round(consumed * 100) / 100;
+}
+
+/**
+ * R14: remainder = amount − consumed, floored at zero.
+ */
+export function projectionRemainder(
+  amount: number,
+  assigned: Array<{ status: string | null; total: number | string | null }>
+): number {
+  return Math.max(
+    0,
+    Math.round((amount - projectionConsumed(assigned)) * 100) / 100
+  );
 }
 
 /**

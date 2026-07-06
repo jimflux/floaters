@@ -3,6 +3,7 @@ import { requireConnection, json, handleError } from "@/lib/api-helpers";
 import {
   projectionToApi,
   projectionRemainder,
+  projectionConsumed,
   isLapsed,
   clientKey,
   type ProjectionRow,
@@ -80,14 +81,13 @@ export async function GET() {
 
     const projections = (((projectionRows as ProjectionRow[]) || [])).map((row) => {
       const assigned = assignedByProjection.get(row.id) || [];
-      const remainder = projectionRemainder(
-        Number(row.amount),
-        assigned.map((a) => ({ status: a.status, total: a.total }))
-      );
+      const totals = assigned.map((a) => ({ status: a.status, total: a.total }));
+      const remainder = projectionRemainder(Number(row.amount), totals);
       return {
         ...projectionToApi(row),
         clientKey: clientKey(row.contact_id, row.client_label),
         remainder,
+        consumed: projectionConsumed(totals),
         lapsed: isLapsed(row.expected_month, currentMonth, remainder),
         invoiceIds: assigned.map((a) => a.xero_id),
       };

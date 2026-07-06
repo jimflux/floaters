@@ -139,7 +139,20 @@ describe("GET /api/pipeline", () => {
     ];
     const res = await run();
     expect(res.projections[0].remainder).toBe(25000);
+    expect(res.projections[0].consumed).toBe(20000);
     expect(res.projections[0].invoiceIds).toEqual(["a", "v"]);
+  });
+
+  it("exposes consumed beyond the amount so over-assignment stays visible", async () => {
+    state.projections = [
+      { id: "p1", connection_id: "conn", client_label: "IKEA", contact_id: "c1", amount: 10000, expected_month: "2026-08", created_at: "", updated_at: "" },
+    ];
+    state.invoices = [
+      invoice({ xero_id: "big", projection_id: "p1", status: "PAID", total: 15000, reviewed_at: "x" }),
+    ];
+    const res = await run();
+    expect(res.projections[0].remainder).toBe(0);
+    expect(res.projections[0].consumed).toBe(15000);
   });
 
   it("lapsed: month before current with remainder > 0; not when equal or consumed (R18)", async () => {

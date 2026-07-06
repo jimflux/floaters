@@ -109,6 +109,60 @@ export function setProjectionOverride(accountCode: string, month: string, amount
   });
 }
 
+// --- Income pipeline: projections CRUD + invoice review/assignment ---
+
+export interface ProjectionInput {
+  clientLabel: string;
+  amount: number; // inc VAT
+  expectedMonth: string; // yyyy-MM
+  contactId?: string | null;
+}
+
+export function createProjection(input: ProjectionInput): Promise<void> {
+  return fetch(`${API_BASE}/api/projections`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(input),
+  }).then(res => {
+    if (!res.ok) throw new Error(`Create projection failed: ${res.status}`);
+  });
+}
+
+export function updateProjection(id: string, patch: Partial<ProjectionInput>): Promise<void> {
+  return fetch(`${API_BASE}/api/projections/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: jsonHeaders,
+    body: JSON.stringify(patch),
+  }).then(res => {
+    if (!res.ok) throw new Error(`Update projection failed: ${res.status}`);
+  });
+}
+
+export function deleteProjection(id: string): Promise<void> {
+  return fetch(`${API_BASE}/api/projections/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers,
+  }).then(res => {
+    if (!res.ok) throw new Error(`Delete projection failed: ${res.status}`);
+  });
+}
+
+// Review/assign goes through the adjustments endpoint (locally-owned invoice
+// fields). projectionId: uuid assigns (and implies review); null unassigns;
+// reviewed: true approves standalone.
+export function reviewInvoice(
+  invoiceId: string,
+  body: { projectionId?: string | null; reviewed?: boolean }
+): Promise<void> {
+  return fetch(`${API_BASE}/api/adjustments/${encodeURIComponent(invoiceId)}`, {
+    method: 'PATCH',
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  }).then(res => {
+    if (!res.ok) throw new Error(`Review failed: ${res.status}`);
+  });
+}
+
 export function removeProjectionOverride(accountCode: string, month: string): Promise<void> {
   return fetch(`${API_BASE}/api/projection-overrides?accountCode=${encodeURIComponent(accountCode)}&month=${encodeURIComponent(month)}`, {
     method: 'DELETE',

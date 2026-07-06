@@ -68,7 +68,8 @@ export interface PipelineProjection {
   contactId: string | null;
   amount: number; // VAT-inclusive
   expectedMonth: string; // yyyy-MM
-  remainder: number; // amount minus assigned invoice totals (excl. VOIDED/DELETED), floor 0
+  remainder: number; // amount minus consumed, floor 0
+  consumed: number; // Σ assigned invoice totals (excl. VOIDED/DELETED); > amount means over-assigned
   lapsed: boolean; // expected month passed with remainder > 0 (derived)
   invoiceIds: string[];
   createdAt: string;
