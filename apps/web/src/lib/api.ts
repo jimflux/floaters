@@ -1,4 +1,4 @@
-import type { CashflowData, AccountGroup } from './types';
+import type { CashflowData, AccountGroup, PipelineResponse } from './types';
 
 // The web app is served by the Next API itself (single service), so by default
 // it talks to the same origin — '' makes requests like `/api/cashflow` relative.
@@ -11,9 +11,23 @@ const API_KEY = import.meta.env.VITE_API_KEY ?? '';
 const headers = { 'Authorization': `Bearer ${API_KEY}` };
 const jsonHeaders = { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' };
 
+// localStorage warm-start keys, versioned: the response shape broke when
+// income became layered (v2), and a stale pre-break payload hydrating the new
+// UI would crash it — the web build does not typecheck, so the version bump is
+// the only guard.
+export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v2';
+export const OVERRIDES_CACHE_KEY = 'projection_overrides_cache_v2';
+
 export function getCashflow(): Promise<CashflowData> {
   return fetch(`${API_BASE}/api/cashflow?back=3&forward=12`, { headers }).then(res => {
     if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.json();
+  });
+}
+
+export function getPipeline(): Promise<PipelineResponse> {
+  return fetch(`${API_BASE}/api/pipeline`, { headers }).then(res => {
+    if (!res.ok) throw new Error(`Pipeline fetch failed: ${res.status}`);
     return res.json();
   });
 }
