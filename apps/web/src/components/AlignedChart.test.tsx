@@ -49,3 +49,56 @@ describe("AlignedChart solid/dashed split (regression for split point moving on 
     expect(dashedD).toMatch(/L 350 [\d.-]+$/);
   });
 });
+
+describe("AlignedChart two-series geometry (committed vs optimistic)", () => {
+  it("shares the previous-month anchor and diverges only from the current month onward", () => {
+    const { container, getByTestId } = render(
+      <AlignedChart
+        months={["2026-04", "2026-05", "2026-06", "2026-07"]}
+        closingBalance={[1000, 2000, 3000, 4000]}
+        optimisticClosing={[1000, 2000, 3500, 5000]}
+        currentMonthIndex={2}
+        formatMonth={(m) => m}
+      />
+    );
+
+    const optLine = getByTestId("optimistic-line");
+    const optD = optLine.getAttribute("d")!.trim();
+    // Starts at the shared previous-month anchor (x=150, committed y),
+    // because history is identical for both series.
+    const committedLines = Array.from(
+      container.querySelectorAll<SVGPathElement>('svg path[fill="none"]')
+    ).filter((p) => p !== optLine);
+    const dashed = committedLines.find((p) => p.getAttribute("stroke-dasharray") === "6 3")!;
+    const committedStart = dashed.getAttribute("d")!.trim().match(/^M 150 ([\d.]+)/)![1];
+    expect(optD).toMatch(new RegExp(`^M 150 ${committedStart}`));
+    // ...and runs through the current (x=250) and future (x=350) months.
+    expect(optD).toContain("L 250");
+    expect(optD).toMatch(/L 350 [\d.-]+$/);
+
+    // The band between the series exists.
+    expect(getByTestId("optimistic-band")).toBeTruthy();
+    // Legend labels both lines.
+    expect(container.textContent).toContain("Committed");
+    expect(container.textContent).toContain("If projections land");
+  });
+
+  it("renders no band, optimistic line, or legend when the series are identical", () => {
+    const { container, queryByTestId } = render(
+      <AlignedChart
+        months={["2026-05", "2026-06", "2026-07"]}
+        closingBalance={[1000, 2000, 3000]}
+        optimisticClosing={[1000, 2000, 3000]}
+        currentMonthIndex={1}
+        formatMonth={(m) => m}
+      />
+    );
+    expect(queryByTestId("optimistic-line")).toBeNull();
+    expect(queryByTestId("optimistic-band")).toBeNull();
+    expect(container.textContent).not.toContain("If projections land");
+    // No NaN anywhere in any path geometry.
+    for (const p of Array.from(container.querySelectorAll("svg path"))) {
+      expect(p.getAttribute("d")).not.toContain("NaN");
+    }
+  });
+});

@@ -121,7 +121,7 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, accounts = [] } = data;
   const currentMonth = months[currentMonthIndex];
   const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
 
@@ -175,6 +175,11 @@ export default function CashflowPage() {
                   <p className={`text-2xl font-bold tracking-tight ${getZeroColor(fallsBelowZeroIn)}`}>
                     {fallsBelowZeroIn || 'Never'}
                   </p>
+                  {optimisticFallsBelowZeroIn !== fallsBelowZeroIn && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      If projections land: {optimisticFallsBelowZeroIn || 'Never'}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -183,6 +188,7 @@ export default function CashflowPage() {
                 <AlignedChart
                   months={months}
                   closingBalance={committedClosing}
+                  optimisticClosing={optimisticClosing}
                   currentMonthIndex={currentMonthIndex}
                   formatMonth={formatMonth}
                   colWidth={undefined}
