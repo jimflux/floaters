@@ -4,13 +4,17 @@ import { NextRequest } from "next/server";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { z } from "zod/v4";
 import { HISTORY_MONTHS } from "@/lib/xero/sync";
+import { projectionRemainder, isLapsed, clientKey } from "@/lib/pipeline";
 import type {
   CashflowResponse,
   CashflowAccount,
   CashflowAccountInfo,
+  IncomeClient,
 } from "@/types/api";
 
-const INCOME_TYPES = new Set(["REVENUE", "SALES"]);
+// Interest income arrives as OTHERINCOME; without it R7 lands in costs as a
+// negative.
+const INCOME_TYPES = new Set(["REVENUE", "SALES", "OTHERINCOME"]);
 // Everything that isn't income goes into costs
 
 // Cost projections use a 3-month historical average
@@ -71,6 +75,8 @@ export async function GET(request: NextRequest) {
       accountsResult,
       hiddenResult,
       overrideResult,
+      projectionResult,
+      assignedResult,
     ] = await Promise.all([
       supabase
         .from("xero_bank_transactions")
@@ -86,7 +92,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from("xero_invoices")
         .select(
-          "type, total, amount_due, due_date, expected_payment_date, status, line_items"
+          "xero_id, type, total, amount_due, due_date, expected_payment_date, status, line_items, contact_id, contact_name"
         )
         .eq("connection_id", connectionId)
         .in("status", ["AUTHORISED", "SUBMITTED"]),
@@ -110,20 +116,33 @@ export async function GET(request: NextRequest) {
         .from("projection_overrides")
         .select("account_code, month, amount")
         .eq("connection_id", connectionId),
+      supabase
+        .from("income_projections")
+        .select("*")
+        .eq("connection_id", connectionId),
+      // Every invoice linked to a projection, any status: remainders net
+      // against totals (R14), and VOIDED/DELETED are excluded in the helper
+      supabase
+        .from("xero_invoices")
+        .select("xero_id, projection_id, status, total")
+        .eq("connection_id", connectionId)
+        .not("projection_id", "is", null),
     ]);
 
     const bankTxns = bankTxnResult.data || [];
     const payments = paymentResult.data || [];
-    const invoices = invoiceResult.data || [];
+    const openInvoices = invoiceResult.data || [];
     const bankAccounts = bankAccountResult.data || [];
     const chartAccounts = accountsResult.data || [];
+    const projections = projectionResult.data || [];
+    const assignedInvoices = assignedResult.data || [];
     const hiddenCodes = new Set(
       (hiddenResult.data || []).map((r) => r.account_code)
     );
 
-    // Payments attribute to accounts via their invoice's line items. Those
-    // invoices are often PAID (excluded from the projection query above), so
-    // fetch them separately by id, any status.
+    // Payments attribute via their invoice: ACCREC whole-amount by client,
+    // ACCPAY via line items. Those invoices are often PAID (excluded from the
+    // open-invoice query above), so fetch them separately by id, any status.
     const paymentInvoiceIds = [
       ...new Set(
         payments
@@ -136,7 +155,7 @@ export async function GET(request: NextRequest) {
         ? (
             await supabase
               .from("xero_invoices")
-              .select("xero_id, type, total, line_items")
+              .select("xero_id, type, total, line_items, contact_id, contact_name")
               .eq("connection_id", connectionId)
               .in("xero_id", paymentInvoiceIds)
           ).data || []
@@ -145,7 +164,8 @@ export async function GET(request: NextRequest) {
       attributionInvoices.map((inv) => [inv.xero_id as string, inv])
     );
 
-    // Build override lookup: accountCode -> month -> amount
+    // Build override lookup: accountCode -> month -> amount. Income overrides
+    // retired at cutover: only the costs section reads these (R12).
     const overrideLookup = new Map<string, Map<string, number>>();
     for (const o of overrideResult.data || []) {
       if (!overrideLookup.has(o.account_code)) {
@@ -167,24 +187,66 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    function getSection(accType: string): "income" | "costs" {
-      return INCOME_TYPES.has(accType) ? "income" : "costs";
-    }
+    // -----------------------------------------------------------------------
+    // Income: a pipeline of items rolled up by client in three layers.
+    // Costs: the account model, unchanged.
+    // -----------------------------------------------------------------------
 
-    // Two accumulations per section: actual cash (bank txns + payments) and
-    // projected cash (unpaid invoices). Keeping them separate is what lets
-    // history stay pure cash while the current month blends.
     type MonthTotals = Map<string, number>;
     type AccountData = { name: string; type: string; months: MonthTotals };
     type AccountMap = Map<string, AccountData>;
 
-    const actualIn: AccountMap = new Map();
     const actualOut: AccountMap = new Map();
-    const projectedIn: AccountMap = new Map();
     const projectedOut: AccountMap = new Map();
-    // Net actual cash per month (in minus out) across ALL accounts; drives
-    // the balance anchor split for the current month
+    // Net actual cash per month (in minus out) across every flow; drives the
+    // balance anchor split for the current month. Whole ACCREC payments are
+    // counted here — the walk reconciles to the bank, not to the account
+    // passes.
     const actualMonthNet = new Map<string, number>();
+
+    type ClientData = {
+      name: string;
+      nameRank: number; // invoice names beat projection labels beat fallback
+      paid: MonthTotals;
+      invoiced: MonthTotals;
+      projected: MonthTotals;
+      overdue: Set<string>;
+    };
+    const incomeClients = new Map<string, ClientData>();
+
+    function clientFor(key: string): ClientData {
+      let c = incomeClients.get(key);
+      if (!c) {
+        c = {
+          name: key === "UNASSIGNED" ? "Unassigned" : "",
+          nameRank: key === "UNASSIGNED" ? 3 : 0,
+          paid: new Map(),
+          invoiced: new Map(),
+          projected: new Map(),
+          overdue: new Set(),
+        };
+        incomeClients.set(key, c);
+      }
+      return c;
+    }
+
+    function nameClient(key: string, name: string | null, rank: number) {
+      const c = clientFor(key);
+      if (name && rank > c.nameRank) {
+        c.name = name;
+        c.nameRank = rank;
+      }
+    }
+
+    function addIncome(
+      layer: "paid" | "invoiced" | "projected",
+      key: string,
+      monthKey: string,
+      amount: number
+    ) {
+      const c = clientFor(key);
+      c[layer].set(monthKey, (c[layer].get(monthKey) || 0) + amount);
+    }
 
     function addTo(
       map: AccountMap,
@@ -201,9 +263,10 @@ export async function GET(request: NextRequest) {
       acc.months.set(monthKey, (acc.months.get(monthKey) || 0) + amount);
     }
 
-    // signedCash orientation: positive = money in. Income accounts store it
-    // as-is; cost accounts store the negation (positive = money out), so a
-    // refund reduces its own section instead of inflating the other.
+    // signedCash orientation: positive = money in. Income-type lines route to
+    // the UNASSIGNED income layers (paid when banked, invoiced when expected);
+    // cost accounts store the negation (positive = money out), so a refund
+    // reduces its own section instead of inflating the other.
     function addActual(
       code: string,
       name: string,
@@ -211,9 +274,8 @@ export async function GET(request: NextRequest) {
       monthKey: string,
       signedCash: number
     ) {
-      const section = getSection(type);
-      if (section === "income") {
-        addTo(actualIn, code, name, type, monthKey, signedCash);
+      if (INCOME_TYPES.has(type)) {
+        addIncome("paid", "UNASSIGNED", monthKey, signedCash);
       } else {
         addTo(actualOut, code, name, type, monthKey, -signedCash);
       }
@@ -230,9 +292,10 @@ export async function GET(request: NextRequest) {
       monthKey: string,
       signedCash: number
     ) {
-      const section = getSection(type);
-      if (section === "income") {
-        addTo(projectedIn, code, name, type, monthKey, signedCash);
+      if (INCOME_TYPES.has(type)) {
+        // Post-dated receipts and bill income lines are expected cash: they
+        // sit with the promises, not the banked money (R18).
+        addIncome("invoiced", "UNASSIGNED", monthKey, signedCash);
       } else {
         addTo(projectedOut, code, name, type, monthKey, -signedCash);
       }
@@ -283,7 +346,8 @@ export async function GET(request: NextRequest) {
     // banked. `now` above is startOfMonth, so take today's date afresh.
     const today = format(new Date(), "yyyy-MM-dd");
 
-    // Actual cash: bank transactions (spend/receive money)
+    // Bank transactions (spend/receive money). Income-type lines land in the
+    // UNASSIGNED paid layer via addActual; everything else stays account-based.
     for (const txn of bankTxns) {
       const status = (txn.status as string) || "";
       const type = (txn.type as string) || "";
@@ -297,7 +361,9 @@ export async function GET(request: NextRequest) {
       distribute(add, monthKey, dir, Number(txn.total) || 0, lineItems);
     }
 
-    // Actual cash: invoice payments, attributed via the invoice's line items
+    // Invoice payments. ACCREC payments are whole-document income under their
+    // client (R13) — their line-level shares never touch the costs pass.
+    // ACCPAY payments keep the line-item attribution on cost accounts.
     for (const p of payments) {
       if ((p.status as string) === "DELETED") continue;
       const monthKey = (p.date as string).slice(0, 7);
@@ -311,17 +377,38 @@ export async function GET(request: NextRequest) {
               ? 1
               : inv?.type === "ACCPAY"
                 ? -1
-                : 0;
+                  : 0;
       if (dir === 0) continue; // direction unknowable; never guess with money
-      const lineItems = (inv?.line_items as LineItem[] | null) || [];
-      const add = (p.date as string) > today ? addProjected : addActual;
-      distribute(add, monthKey, dir, Number(p.amount) || 0, lineItems);
+      const amount = Number(p.amount) || 0;
+      const postDated = (p.date as string) > today;
+
+      if (dir === 1) {
+        const key = clientKey(
+          (inv?.contact_id as string | null) ?? null,
+          (inv?.contact_name as string | null) ?? null
+        );
+        nameClient(key, (inv?.contact_name as string | null) ?? null, 2);
+        if (postDated) {
+          addIncome("invoiced", key, monthKey, amount);
+        } else {
+          addIncome("paid", key, monthKey, amount);
+          actualMonthNet.set(
+            monthKey,
+            (actualMonthNet.get(monthKey) || 0) + amount
+          );
+        }
+      } else {
+        const lineItems = (inv?.line_items as LineItem[] | null) || [];
+        const add = postDated ? addProjected : addActual;
+        distribute(add, monthKey, dir, amount, lineItems);
+      }
     }
 
-    // Projected cash: unpaid invoices at their remaining amount, bucketed at
-    // expected/due date and floored to the current month (overdue rolls
-    // forward; the past is cash only)
-    for (const inv of invoices) {
+    // Unpaid ACCREC invoices: the invoiced layer, whole remaining amount under
+    // their client, bucketed at expected/due date and floored to the current
+    // month (overdue rolls forward and is flagged; the past is cash only).
+    // Unpaid ACCPAY bills keep the account-based projected pass.
+    for (const inv of openInvoices) {
       const status = inv.status as string;
       if (status !== "AUTHORISED" && status !== "SUBMITTED") continue;
       const remaining = Number(inv.amount_due) || 0;
@@ -334,9 +421,54 @@ export async function GET(request: NextRequest) {
       if (projMonth < currentMonth) projMonth = currentMonth;
       if (!months.includes(projMonth)) continue;
 
-      const dir = inv.type === "ACCREC" ? 1 : -1;
-      const lineItems = (inv.line_items as LineItem[] | null) || [];
-      distribute(addProjected, projMonth, dir, remaining, lineItems);
+      if (inv.type === "ACCREC") {
+        const key = clientKey(
+          inv.contact_id as string | null,
+          inv.contact_name as string | null
+        );
+        nameClient(key, inv.contact_name as string | null, 2);
+        addIncome("invoiced", key, projMonth, remaining);
+        if (rawDate < today) clientFor(key).overdue.add(projMonth);
+      } else {
+        const lineItems = (inv.line_items as LineItem[] | null) || [];
+        distribute(addProjected, projMonth, -1, remaining, lineItems);
+      }
+    }
+
+    // Projections: non-lapsed remainders at their expected month, never
+    // floored (R18 — non-lapsed implies current or later). Lapsed projections
+    // leave the optimistic layer entirely and surface via /api/pipeline.
+    const assignedByProjection = new Map<
+      string,
+      Array<{ status: string | null; total: number | string | null }>
+    >();
+    for (const inv of assignedInvoices) {
+      const pid = inv.projection_id as string;
+      const list = assignedByProjection.get(pid) || [];
+      list.push({ status: inv.status as string | null, total: inv.total as number | null });
+      assignedByProjection.set(pid, list);
+    }
+
+    for (const proj of projections) {
+      const remainder = projectionRemainder(
+        Number(proj.amount),
+        assignedByProjection.get(proj.id as string) || []
+      );
+      if (remainder <= 0) continue;
+      const expectedMonth = proj.expected_month as string;
+      if (isLapsed(expectedMonth, currentMonth, remainder)) continue;
+      if (!months.includes(expectedMonth)) continue;
+
+      const key = clientKey(
+        proj.contact_id as string | null,
+        proj.client_label as string | null
+      );
+      nameClient(
+        key,
+        ((proj.client_label as string) || "").trim().replace(/\s+/g, " ") || null,
+        1
+      );
+      addIncome("projected", key, expectedMonth, remainder);
     }
 
     // The last 3 calendar months before the current one, independent of the
@@ -346,33 +478,28 @@ export async function GET(request: NextRequest) {
       avgMonths.push(format(subMonths(now, i), "yyyy-MM"));
     }
 
-    // Ensure accounts with current/future overrides appear even without flows
+    // Ensure cost accounts with current/future overrides appear even without
+    // flows (income no longer reads overrides)
     for (const [code] of overrideLookup) {
       const acc = accountLookup.get(code);
-      if (!acc || acc.type === "BANK") continue;
-      const section = getSection(acc.type);
-      const actualMap = section === "income" ? actualIn : actualOut;
-      if (!actualMap.has(code)) {
-        addTo(actualMap, code, acc.name, acc.type, "", 0);
+      if (!acc || acc.type === "BANK" || INCOME_TYPES.has(acc.type)) continue;
+      if (!actualOut.has(code)) {
+        addTo(actualOut, code, acc.name, acc.type, "", 0);
       }
     }
 
-    // Build per-account rows following the column semantics:
+    // Build per-account cost rows following the column semantics:
     //   past = actual cash only; current = cash so far + projected remainder;
-    //   future = invoice data (wins by presence), else override, else the
-    //   3-month average for costs
-    function buildAccounts(
-      actualMap: AccountMap,
-      projectedMap: AccountMap,
-      section: "income" | "costs"
-    ): CashflowAccount[] {
-      const codes = new Set([...actualMap.keys(), ...projectedMap.keys()]);
+    //   future = bill data (wins by presence), else override, else the
+    //   3-month average
+    function buildCostAccounts(): CashflowAccount[] {
+      const codes = new Set([...actualOut.keys(), ...projectedOut.keys()]);
       const accounts: CashflowAccount[] = [];
 
       for (const code of codes) {
-        const data = actualMap.get(code) || projectedMap.get(code)!;
-        const actual = actualMap.get(code)?.months;
-        const projected = projectedMap.get(code)?.months;
+        const data = actualOut.get(code) || projectedOut.get(code)!;
+        const actual = actualOut.get(code)?.months;
+        const projected = projectedOut.get(code)?.months;
         const accountOverrides = overrideLookup.get(code);
 
         const avgValues = avgMonths.map((m) => actual?.get(m) || 0);
@@ -399,7 +526,7 @@ export async function GET(request: NextRequest) {
               remainder = proj;
             } else if (ovr !== undefined) {
               remainder = Math.max(0, ovr - cashMTD);
-            } else if (section === "costs" && avg > cashMTD) {
+            } else if (avg > cashMTD) {
               remainder = avg - cashMTD;
             }
             monthly.push(round(cashMTD + remainder));
@@ -412,11 +539,8 @@ export async function GET(request: NextRequest) {
             } else if (ovr !== undefined) {
               monthly.push(round(ovr));
               hasOverride.push(true);
-            } else if (section === "costs") {
-              monthly.push(round(avg));
-              hasOverride.push(false);
             } else {
-              monthly.push(0);
+              monthly.push(round(avg));
               hasOverride.push(false);
             }
             isProjected.push(true);
@@ -450,66 +574,141 @@ export async function GET(request: NextRequest) {
       return accounts;
     }
 
-    // Full lists include hidden accounts: their cash moved, so they stay in
-    // the nets and balances; only their rows are filtered from the response
-    const allCashIn = buildAccounts(actualIn, projectedIn, "income");
-    const allCashOut = buildAccounts(actualOut, projectedOut, "costs");
+    // Build the income section: client rows with per-layer series and the
+    // section's per-layer totals. Hidden accounts do not apply to income.
+    function buildIncome(): {
+      clients: IncomeClient[];
+      totals: { paid: number[]; invoiced: number[]; projected: number[] };
+    } {
+      const clients: IncomeClient[] = [];
+      const totals = {
+        paid: new Array(months.length).fill(0) as number[],
+        invoiced: new Array(months.length).fill(0) as number[],
+        projected: new Array(months.length).fill(0) as number[],
+      };
 
-    const netCashMovement: number[] = new Array(months.length).fill(0);
-    for (let i = 0; i < months.length; i++) {
-      const inflows = allCashIn.reduce((s, a) => s + a.monthly[i], 0);
-      const outflows = allCashOut.reduce((s, a) => s + a.monthly[i], 0);
-      netCashMovement[i] = round(inflows - outflows);
+      for (const [key, data] of incomeClients) {
+        const paid: number[] = [];
+        const invoiced: number[] = [];
+        const projected: number[] = [];
+        const monthly: number[] = [];
+        const overdue: boolean[] = [];
+
+        for (let i = 0; i < months.length; i++) {
+          const m = months[i];
+          const p = round(data.paid.get(m) || 0);
+          const inv = round(data.invoiced.get(m) || 0);
+          const proj = round(data.projected.get(m) || 0);
+          paid.push(p);
+          invoiced.push(inv);
+          projected.push(proj);
+          monthly.push(round(p + inv + proj));
+          overdue.push(data.overdue.has(m));
+          totals.paid[i] = round(totals.paid[i] + p);
+          totals.invoiced[i] = round(totals.invoiced[i] + inv);
+          totals.projected[i] = round(totals.projected[i] + proj);
+        }
+
+        if (monthly.some((v) => v !== 0)) {
+          clients.push({
+            clientKey: key,
+            clientName: data.name || "Unknown",
+            monthly,
+            paid,
+            invoiced,
+            projected,
+            overdue,
+          });
+        }
+      }
+
+      clients.sort(
+        (a, b) =>
+          b.monthly.reduce((s, v) => s + v, 0) -
+          a.monthly.reduce((s, v) => s + v, 0)
+      );
+
+      return { clients, totals };
     }
 
-    const cashIn = allCashIn.filter((a) => !hiddenCodes.has(a.accountCode));
+    const allCashOut = buildCostAccounts();
+    const income = buildIncome();
+
+    // Committed = cash + invoices sent + the costs section's forecasts; the
+    // headline never includes hope. Optimistic adds unfulfilled projection
+    // remainders (R9/R10).
+    const committedNet: number[] = new Array(months.length).fill(0);
+    const optimisticNet: number[] = new Array(months.length).fill(0);
+    for (let i = 0; i < months.length; i++) {
+      const outflows = allCashOut.reduce((s, a) => s + a.monthly[i], 0);
+      committedNet[i] = round(
+        income.totals.paid[i] + income.totals.invoiced[i] - outflows
+      );
+      optimisticNet[i] = round(committedNet[i] + income.totals.projected[i]);
+    }
+
     const cashOut = allCashOut.filter((a) => !hiddenCodes.has(a.accountCode));
 
-    // Balance walk, anchored on the actual bank balance today:
-    //   current closing = today + projected remainder (a projected month-end)
+    // Balance walks, anchored on the actual bank balance today:
+    //   current closing = today + committed remainder (a projected month-end)
     //   previous closing = today - cash so far this month
-    //   history walks backwards on cash-only nets; the future walks forward
-    const closingBalance: number[] = new Array(months.length).fill(0);
-    const openingBalance: number[] = new Array(months.length).fill(0);
+    //   history walks backwards on cash-only nets; the future walks forward.
+    // The optimistic walk shares the identical history and diverges from the
+    // current month by the cumulative projected remainders.
+    const committedClosing: number[] = new Array(months.length).fill(0);
+    const committedOpening: number[] = new Array(months.length).fill(0);
+    const optimisticClosing: number[] = new Array(months.length).fill(0);
 
     const cashMTDNet = actualMonthNet.get(currentMonth) || 0;
-    closingBalance[currentMonthIndex] = round(
-      currentBalance + (netCashMovement[currentMonthIndex] - cashMTDNet)
+    committedClosing[currentMonthIndex] = round(
+      currentBalance + (committedNet[currentMonthIndex] - cashMTDNet)
     );
     if (currentMonthIndex > 0) {
-      closingBalance[currentMonthIndex - 1] = round(
+      committedClosing[currentMonthIndex - 1] = round(
         currentBalance - cashMTDNet
       );
       for (let i = currentMonthIndex - 2; i >= 0; i--) {
-        closingBalance[i] = round(
-          closingBalance[i + 1] - netCashMovement[i + 1]
+        committedClosing[i] = round(
+          committedClosing[i + 1] - committedNet[i + 1]
         );
       }
     }
     for (let i = currentMonthIndex + 1; i < months.length; i++) {
-      closingBalance[i] = round(closingBalance[i - 1] + netCashMovement[i]);
+      committedClosing[i] = round(committedClosing[i - 1] + committedNet[i]);
     }
     for (let i = 0; i < months.length; i++) {
-      openingBalance[i] =
+      committedOpening[i] =
         i === 0
-          ? round(closingBalance[0] - netCashMovement[0])
-          : closingBalance[i - 1];
+          ? round(committedClosing[0] - committedNet[0])
+          : committedClosing[i - 1];
     }
 
-    // "Falls below £0 in" — format is string-matched by the web app
-    let fallsBelowZeroIn: string | null = null;
-    for (let i = currentMonthIndex; i < months.length; i++) {
-      if (closingBalance[i] < 0) {
-        const monthsUntil = i - currentMonthIndex;
-        if (monthsUntil === 0) fallsBelowZeroIn = "This month";
-        else if (monthsUntil === 1) fallsBelowZeroIn = "1 month";
-        else fallsBelowZeroIn = `${monthsUntil} months`;
-        break;
+    let projectedCumulative = 0;
+    for (let i = 0; i < months.length; i++) {
+      if (i < currentMonthIndex) {
+        optimisticClosing[i] = committedClosing[i];
+      } else {
+        projectedCumulative += income.totals.projected[i];
+        optimisticClosing[i] = round(committedClosing[i] + projectedCumulative);
       }
     }
 
+    // "Falls below £0 in" — format is string-matched by the web app
+    function fallsBelow(series: number[]): string | null {
+      for (let i = currentMonthIndex; i < series.length; i++) {
+        if (series[i] < 0) {
+          const monthsUntil = i - currentMonthIndex;
+          if (monthsUntil === 0) return "This month";
+          if (monthsUntil === 1) return "1 month";
+          return `${monthsUntil} months`;
+        }
+      }
+      return null;
+    }
+
     // Accounts info list (P&L accounts with hidden status; bank accounts are
-    // not part of the income/costs grid)
+    // not part of the grid). Income hiding no longer affects the income
+    // section but the flag is kept for the management panel.
     const accounts: CashflowAccountInfo[] = chartAccounts
       .filter((a) => a.code && a.type !== "BANK")
       .map((a) => ({
@@ -525,14 +724,17 @@ export async function GET(request: NextRequest) {
 
     const response: CashflowResponse = {
       currentBalance: round(currentBalance),
-      fallsBelowZeroIn,
+      fallsBelowZeroIn: fallsBelow(committedClosing),
+      optimisticFallsBelowZeroIn: fallsBelow(optimisticClosing),
       currentMonthIndex,
       months,
-      cashIn,
+      income,
       cashOut,
-      openingBalance,
-      closingBalance,
-      netCashMovement,
+      committedOpening,
+      committedClosing,
+      committedNet,
+      optimisticClosing,
+      optimisticNet,
       accounts,
     };
 
