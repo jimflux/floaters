@@ -17,9 +17,27 @@ function seedData(): CashflowData {
   return {
     currentBalance: 0,
     fallsBelowZeroIn: null,
+    optimisticFallsBelowZeroIn: null,
     currentMonthIndex: 1,
     months: ["2026-05", "2026-06", "2026-07"],
-    cashIn: [],
+    income: {
+      clients: [
+        {
+          clientKey: "contact:c1",
+          clientName: "IKEA",
+          monthly: [0, 0, 45500],
+          paid: [0, 0, 0],
+          invoiced: [0, 0, 0],
+          projected: [0, 0, 45500],
+          overdue: [false, false, false],
+        },
+      ],
+      totals: {
+        paid: [0, 0, 0],
+        invoiced: [0, 0, 0],
+        projected: [0, 0, 45500],
+      },
+    },
     cashOut: [
       {
         accountCode: "400",
@@ -29,9 +47,11 @@ function seedData(): CashflowData {
         hasOverride: [false, false, false],
       },
     ],
-    openingBalance: [0, 0, 0],
-    closingBalance: [0, 0, 0],
-    netCashMovement: [0, 0, 0],
+    committedOpening: [0, 0, 0],
+    committedClosing: [0, 0, 0],
+    committedNet: [0, 0, 0],
+    optimisticClosing: [0, 0, 0],
+    optimisticNet: [0, 0, 0],
     accounts: [],
   };
 }
@@ -81,6 +101,27 @@ describe("EditableCell save (regression for edits looking unsaved)", () => {
     const acct = cached.cashOut.find((a) => a.accountCode === "400")!;
     expect(acct.monthly[2]).toBe(5000);
     expect(acct.hasOverride[2]).toBe(true);
+  });
+
+  it("patches costs only and leaves the layered income section untouched", async () => {
+    // Guards the crash no build step would catch: the pre-pipeline patch
+    // mapped over old.cashIn, which no longer exists on the layered shape.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["cashflow"], seedData());
+    renderCell(qc);
+
+    fireEvent.click(screen.getByRole("button"));
+    const input = await screen.findByRole("spinbutton");
+    fireEvent.change(input, { target: { value: "250" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() =>
+      expect(setOverride).toHaveBeenCalledWith("400", "2026-07", 250)
+    );
+
+    const cached = qc.getQueryData<CashflowData>(["cashflow"])!;
+    expect(cached.income).toEqual(seedData().income);
+    expect(cached.cashOut[0].monthly[2]).toBe(250);
   });
 });
 

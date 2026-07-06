@@ -66,6 +66,8 @@ export default function EditableCell({
     const previousOverrides = queryClient.getQueryData<OverridesCache>(['projection-overrides']);
     queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
       if (!old) return old;
+      // Overrides are costs-only since the income pipeline: income is client
+      // rows, not account rows, and never carries overrides.
       const patchAccounts = (accounts: CashflowAccount[]) =>
         accounts.map(a => {
           if (a.accountCode !== accountCode) return a;
@@ -79,7 +81,7 @@ export default function EditableCell({
           }
           return { ...a, monthly, hasOverride };
         });
-      return { ...old, cashIn: patchAccounts(old.cashIn), cashOut: patchAccounts(old.cashOut) };
+      return { ...old, cashOut: patchAccounts(old.cashOut) };
     });
     queryClient.setQueryData<OverridesCache>(['projection-overrides'], (old) => {
       if (!old) return old;

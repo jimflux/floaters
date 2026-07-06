@@ -32,7 +32,7 @@ server.registerTool(
   {
     title: "Get cash flow",
     description:
-      "Monthly cash-in and cash-out grouped by Xero chart-of-accounts, with opening/closing bank balances, net movement, and the month the balance is projected to fall below zero. Past months are pure cash actuals (bank transactions plus invoice payments); the current month blends cash-to-date with a projected remainder (its closing balance is a projected month-end); future months are projections (unpaid invoices by expected/due date with overdue rolled into the current month, manual overrides, 3-month average for costs). Note: get_forecast uses a separate engine that treats overdue invoices differently.",
+      "Monthly cashflow with income as a pipeline rolled up by client and costs grouped by Xero chart-of-accounts. Income has three layers per client per month: paid (cash received), invoiced (promises: remaining amount due, overdue rolled into the current month and flagged), and projected (unfulfilled projection remainders at their expected month). Client keys are explicit ('contact:<id>', 'label:<normalised>', or 'UNASSIGNED' for non-invoice income). Two balance walks: committed (cash plus invoices sent plus cost forecasts; the headline, so fallsBelowZeroIn reads this and never includes hope) and optimistic (committed plus projection remainders; optimisticFallsBelowZeroIn). Both are identical over history. Past months are pure cash; the current month blends cash-to-date with a projected remainder; costs use bills by expected/due date, manual overrides, then a 3-month average. Note: get_forecast uses a separate engine that predates the pipeline model.",
     inputSchema: {
       monthsBack: z
         .number()
@@ -40,7 +40,7 @@ server.registerTool(
         .min(0)
         .max(12)
         .optional()
-        .describe("Historical months to include (default 3, max 12 — the synced history depth)."),
+        .describe("Historical months to include (default 3, max 12, the synced history depth)."),
       monthsForward: z
         .number()
         .int()
@@ -55,6 +55,23 @@ server.registerTool(
       return ok(
         await apiGet("/api/cashflow", { back: monthsBack, forward: monthsForward })
       );
+    } catch (err) {
+      return fail(err);
+    }
+  }
+);
+
+server.registerTool(
+  "get_income_pipeline",
+  {
+    title: "Get income pipeline",
+    description:
+      "Item-level view of the income pipeline: projections (client key as used by get_cashflow, VAT-inclusive amount, expected month, remainder after assigned invoices, derived lapsed flag, assigned invoice ids), unreviewed invoices awaiting triage (with overdue flags), and the known client contacts. Lapsed projections are hope whose expected month passed unfulfilled; they are excluded from the optimistic balance line until re-dated or deleted.",
+    inputSchema: {},
+  },
+  async () => {
+    try {
+      return ok(await apiGet("/api/pipeline"));
     } catch (err) {
       return fail(err);
     }
@@ -83,7 +100,7 @@ server.registerTool(
   {
     title: "Get cash flow forecast",
     description:
-      "Day/week/month forecast periods with opening, inflows, outflows and closing balance over a date range, optionally overlaying what-if scenarios. Uses a separate engine from get_cashflow: overdue invoices are not rolled forward here, so the two can disagree about the current month.",
+      "Day/week/month forecast periods with opening, inflows, outflows and closing balance over a date range, optionally overlaying what-if scenarios. Uses a separate engine that predates the income pipeline: overdue invoices are not rolled forward and income projections are not included, so it can disagree with get_cashflow's committed series.",
     inputSchema: {
       period: z
         .enum(["daily", "weekly", "monthly"])

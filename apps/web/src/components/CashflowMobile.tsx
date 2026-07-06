@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { triggerSync } from '@/lib/api';
-import type { CashflowData, CashflowAccount } from '@/lib/types';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { triggerSync, getPipeline } from '@/lib/api';
+import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
+import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart from '@/components/AlignedChart';
 
@@ -47,12 +48,21 @@ interface Props {
 
 export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
-  const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, cashIn, cashOut, openingBalance, closingBalance, netCashMovement, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, accounts = [] } = data;
 
   const [activeIdx, setActiveIdx] = useState(currentMonthIndex);
   const [incomeOpen, setIncomeOpen] = useState(true);
+  // Client rows are collapsed by default on the small screen; the layer
+  // subtotals carry the story.
+  const [clientsOpen, setClientsOpen] = useState(false);
   const [costsOpen, setCostsOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pipelineOpen, setPipelineOpen] = useState(false);
+
+  const { data: pipeline } = useQuery<PipelineResponse>({
+    queryKey: ['pipeline'],
+    queryFn: getPipeline,
+  });
 
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
@@ -94,6 +104,14 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
       <header className="flex items-center justify-between px-3 h-12 border-b border-border bg-card">
         <span className="font-semibold text-sm tracking-tight">Floaters</span>
         <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0 relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
+            <Inbox className="h-3.5 w-3.5" />
+            {attentionCount(pipeline) > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-blue-600 text-white text-[9px] font-medium flex items-center justify-center">
+                {attentionCount(pipeline)}
+              </span>
+            )}
+          </Button>
           <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} title="Sync">
             <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
           </Button>
@@ -114,13 +132,17 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
           <span className="text-xs text-muted-foreground">Drops below £0:</span>
           <span className={`text-sm font-semibold ${getZeroColor(fallsBelowZeroIn)}`}>{fallsBelowZeroIn || 'Never'}</span>
         </div>
+        {optimisticFallsBelowZeroIn !== fallsBelowZeroIn && (
+          <p className="text-xs text-muted-foreground mt-0.5">If projections land: {optimisticFallsBelowZeroIn || 'Never'}</p>
+        )}
       </div>
 
       {/* Chart */}
       <div className="px-2 py-3 border-b border-border">
         <AlignedChart
           months={months}
-          closingBalance={closingBalance}
+          closingBalance={committedClosing}
+          optimisticClosing={optimisticClosing}
           currentMonthIndex={currentMonthIndex}
           formatMonth={formatMonthShort}
         />
@@ -169,27 +191,24 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
       {/* Month detail list */}
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="pb-8">
         {/* Opening balance */}
-        <SummaryRowMobile label="Opening balance" value={openingBalance[activeIdx]} />
+        <SummaryRowMobile label="Opening balance" value={committedOpening[activeIdx]} />
 
-        {/* Income */}
+        {/* Income: three layers, client rows collapsed beneath */}
         <SectionHeaderMobile
           label="↗ Income"
-          total={sumMonthly(cashIn, activeIdx)}
+          total={incomeMonthTotal(income, activeIdx)}
           open={incomeOpen}
           onToggle={() => setIncomeOpen(!incomeOpen)}
           accent="border-l-section-income"
         />
-        {incomeOpen && cashIn.map((account, idx) => (
-          <AccountRowMobile
-            key={account.accountCode}
-            account={account}
+        {incomeOpen && (
+          <IncomeLayersMobile
+            income={income}
             monthIndex={activeIdx}
-            months={months}
-            currentMonthIndex={currentMonthIndex}
-            isAlt={idx % 2 === 1}
-            overrideAmounts={overrideAmounts}
+            clientsOpen={clientsOpen}
+            onToggleClients={() => setClientsOpen(!clientsOpen)}
           />
-        ))}
+        )}
 
         {/* Costs */}
         <div className="h-2 bg-background" />
@@ -213,12 +232,63 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
         ))}
 
         {/* Net + Ending */}
-        <SummaryRowMobile label="Net cash movement" value={netCashMovement[activeIdx]} bold colored />
-        <SummaryRowMobile label="Ending balance" value={closingBalance[activeIdx]} />
+        <SummaryRowMobile label="Net cash movement" value={committedNet[activeIdx]} bold colored />
+        <SummaryRowMobile label="Ending balance" value={committedClosing[activeIdx]} />
       </div>
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+      <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
     </div>
+  );
+}
+
+function incomeMonthTotal(income: IncomeSection, i: number): number {
+  return income.totals.paid[i] + income.totals.invoiced[i] + income.totals.projected[i];
+}
+
+function IncomeLayersMobile({ income, monthIndex, clientsOpen, onToggleClients }: {
+  income: IncomeSection; monthIndex: number; clientsOpen: boolean; onToggleClients: () => void;
+}) {
+  const layers: Array<{ label: string; dot: string; value: number; italic?: boolean }> = [
+    { label: 'Paid', dot: 'bg-green-500', value: income.totals.paid[monthIndex] },
+    { label: 'Invoiced', dot: 'bg-blue-500', value: income.totals.invoiced[monthIndex] },
+    { label: 'Projected', dot: 'bg-amber-400', value: income.totals.projected[monthIndex], italic: true },
+  ];
+  const clientsWithValue = income.clients.filter(c => c.monthly[monthIndex] !== 0);
+  return (
+    <>
+      {layers.map(l => (
+        <div key={l.label} data-testid={`m-layer-${l.label.toLowerCase()}`} className="flex items-center justify-between px-4 py-2 border-b border-border bg-row-summary">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground pl-3">
+            <span className={`h-1.5 w-1.5 rounded-full ${l.dot}`} />
+            {l.label}
+          </span>
+          <span className={`text-sm tabular-nums text-muted-foreground ${l.italic ? 'italic' : ''} ${l.value < 0 ? 'text-destructive' : ''}`}>
+            {formatGBP(l.value)}
+          </span>
+        </div>
+      ))}
+      <button
+        onClick={onToggleClients}
+        className="w-full flex items-center justify-between px-4 py-2 border-b border-border bg-card hover:bg-muted/20"
+      >
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground pl-3">
+          {clientsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          By client ({clientsWithValue.length})
+        </span>
+      </button>
+      {clientsOpen && clientsWithValue.map((c, idx) => (
+        <div key={c.clientKey} className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${idx % 2 === 1 ? 'bg-row-alt' : ''}`}>
+          <span className="text-xs pl-6 truncate pr-3 flex-1 inline-flex items-center gap-1.5">
+            {c.clientName}
+            {c.overdue[monthIndex] && <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" title="Contains overdue invoice" />}
+          </span>
+          <span className={`text-sm tabular-nums ${c.monthly[monthIndex] < 0 ? 'text-destructive' : ''}`}>
+            {formatGBP(c.monthly[monthIndex])}
+          </span>
+        </div>
+      ))}
+    </>
   );
 }
 

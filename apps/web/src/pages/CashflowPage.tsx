@@ -1,13 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCashflow, getProjectionOverrides, triggerSync, setProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
-import type { CashflowData, CashflowAccount, CashflowAccountInfo } from '@/lib/types';
+import { getCashflow, getProjectionOverrides, getPipeline, triggerSync, setProjectionOverride, CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY, type ProjectionOverrideEntry } from '@/lib/api';
+import type { CashflowData, CashflowAccount, CashflowAccountInfo, PipelineResponse } from '@/lib/types';
+import IncomeSection, { unreviewedByClientMonth } from '@/components/IncomeSection';
+import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus, Inbox } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
@@ -47,21 +49,31 @@ export default function CashflowPage() {
   const [costsOpen, setCostsOpen] = useState(true);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The pipeline panel (review tray + projections manager) opens from the
+  // income header's + button and the header badge.
+  const [pipelineOpen, setPipelineOpen] = useState(false);
 
   const { data, isLoading, isError, error } = useQuery<CashflowData>({
     queryKey: ['cashflow'],
     queryFn: async () => {
       const result = await getCashflow();
-      try { localStorage.setItem('cashflow_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
+      try { localStorage.setItem(CASHFLOW_CACHE_KEY, JSON.stringify(result)); } catch { /* cache is best-effort */ }
       return result;
     },
     initialData: () => {
       try {
-        const cached = localStorage.getItem('cashflow_cache');
+        const cached = localStorage.getItem(CASHFLOW_CACHE_KEY);
         return cached ? JSON.parse(cached) : undefined;
       } catch { return undefined; }
     },
     initialDataUpdatedAt: 0, // always refetch in background
+  });
+
+  // Item-level pipeline data: feeds the unreviewed badges and (via the panel)
+  // the review tray and projections manager.
+  const { data: pipeline } = useQuery<PipelineResponse>({
+    queryKey: ['pipeline'],
+    queryFn: getPipeline,
   });
 
   // Raw override amounts, keyed accountCode|month, so editing a blended cell
@@ -72,12 +84,12 @@ export default function CashflowPage() {
     queryKey: ['projection-overrides'],
     queryFn: async () => {
       const result = await getProjectionOverrides();
-      try { localStorage.setItem('projection_overrides_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
+      try { localStorage.setItem(OVERRIDES_CACHE_KEY, JSON.stringify(result)); } catch { /* cache is best-effort */ }
       return result;
     },
     initialData: () => {
       try {
-        const cached = localStorage.getItem('projection_overrides_cache');
+        const cached = localStorage.getItem(OVERRIDES_CACHE_KEY);
         return cached ? JSON.parse(cached) : undefined;
       } catch { return undefined; }
     },
@@ -109,7 +121,9 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, cashIn, cashOut, openingBalance, closingBalance, netCashMovement, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, accounts = [] } = data;
+  const currentMonth = months[currentMonthIndex];
+  const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
 
   const minTotalWidth = LABEL_WIDTH + months.length * COL_WIDTH;
   const responsiveGridWidth = `max(${minTotalWidth}px, 100%)`;
@@ -122,6 +136,15 @@ export default function CashflowPage() {
         <span className="font-semibold text-sm tracking-tight">Floaters</span>
         <div className="flex items-center gap-3">
           {lastSync && <span className="text-xs text-muted-foreground">Synced {formatTimeAgo(lastSync)}</span>}
+          <Button variant="outline" size="sm" className="relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
+            <Inbox className="h-3.5 w-3.5" />
+            <span className="ml-1.5">Pipeline</span>
+            {attentionCount(pipeline) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-medium flex items-center justify-center">
+                {attentionCount(pipeline)}
+              </span>
+            )}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
             <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
             <span className="ml-1.5">Sync Now</span>
@@ -152,6 +175,11 @@ export default function CashflowPage() {
                   <p className={`text-2xl font-bold tracking-tight ${getZeroColor(fallsBelowZeroIn)}`}>
                     {fallsBelowZeroIn || 'Never'}
                   </p>
+                  {optimisticFallsBelowZeroIn !== fallsBelowZeroIn && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      If projections land: {optimisticFallsBelowZeroIn || 'Never'}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -159,7 +187,8 @@ export default function CashflowPage() {
               <div className="shrink-0" style={{ width: `calc(100% - ${LABEL_WIDTH}px)` }}>
                 <AlignedChart
                   months={months}
-                  closingBalance={closingBalance}
+                  closingBalance={committedClosing}
+                  optimisticClosing={optimisticClosing}
                   currentMonthIndex={currentMonthIndex}
                   formatMonth={formatMonth}
                   colWidth={undefined}
@@ -187,13 +216,18 @@ export default function CashflowPage() {
               </thead>
               <tbody>
                 {/* Opening balance */}
-                <SummaryRow label="Opening balance" values={openingBalance} months={months} currentMonthIndex={currentMonthIndex} />
+                <SummaryRow label="Opening balance" values={committedOpening} months={months} currentMonthIndex={currentMonthIndex} />
 
-                {/* Income section */}
-                <SectionHeader label="↗ Income" open={incomeOpen} onToggle={() => setIncomeOpen(!incomeOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashIn} allAccounts={accounts} existingCodes={cashIn.map(a => a.accountCode)} section="income" />
-                {incomeOpen && cashIn.map((account, idx) => (
-                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
-                ))}
+                {/* Income section: client rollups in three layers */}
+                <IncomeSection
+                  income={income}
+                  months={months}
+                  currentMonthIndex={currentMonthIndex}
+                  open={incomeOpen}
+                  onToggle={() => setIncomeOpen(!incomeOpen)}
+                  onAddProjection={() => setPipelineOpen(true)}
+                  unreviewed={unreviewed}
+                />
 
                 {/* Spacer between sections */}
                 <tr><td colSpan={months.length + 1} className="h-2 border-0 bg-background" /></tr>
@@ -204,11 +238,11 @@ export default function CashflowPage() {
                   <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
                 ))}
 
-                {/* Net cash movement */}
-                <SummaryRow label="Net cash movement" values={netCashMovement} months={months} currentMonthIndex={currentMonthIndex} bold colored />
+                {/* Net cash movement (committed: never includes hope) */}
+                <SummaryRow label="Net cash movement" values={committedNet} months={months} currentMonthIndex={currentMonthIndex} bold colored />
 
                 {/* Closing balance */}
-                <SummaryRow label="Ending balance" values={closingBalance} months={months} currentMonthIndex={currentMonthIndex} />
+                <SummaryRow label="Ending balance" values={committedClosing} months={months} currentMonthIndex={currentMonthIndex} />
               </tbody>
             </table>
           </div>
@@ -216,6 +250,7 @@ export default function CashflowPage() {
       </div>
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+      <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
     </div>
   );
 }
