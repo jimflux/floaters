@@ -69,6 +69,22 @@ export function deleteAccountGroup(id: string): Promise<void> {
   });
 }
 
+export interface ProjectionOverrideEntry {
+  accountCode: string;
+  month: string;
+  amount: number;
+}
+
+// Raw override amounts. The cashflow response only carries a hasOverride flag;
+// the current month blends cash-to-date with the override, so the stored
+// amount can't be recovered from the cell value.
+export function getProjectionOverrides(): Promise<{ overrides: ProjectionOverrideEntry[] }> {
+  return fetch(`${API_BASE}/api/projection-overrides`, { headers }).then(res => {
+    if (!res.ok) throw new Error(`Fetch overrides failed: ${res.status}`);
+    return res.json();
+  });
+}
+
 export function setProjectionOverride(accountCode: string, month: string, amount: number): Promise<void> {
   return fetch(`${API_BASE}/api/projection-overrides`, {
     method: 'POST',

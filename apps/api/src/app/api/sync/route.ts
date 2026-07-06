@@ -1,6 +1,13 @@
 import { requireConnection, json, handleError } from "@/lib/api-helpers";
-import { runSync } from "@/lib/xero/sync";
+import { runSync, healInvoiceStatuses } from "@/lib/xero/sync";
 import { supabase } from "@/lib/supabase";
+import { NextRequest } from "next/server";
+import { z } from "zod/v4";
+
+const flagsSchema = z.object({
+  full: z.boolean().optional(),
+  heal: z.boolean().optional(),
+});
 
 export async function GET() {
   try {
@@ -50,11 +57,36 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const connectionId = await requireConnection();
-    const records = await runSync(connectionId, true);
-    return json({ ok: true, recordsSynced: records });
+
+    // Optional flags: { full: true } forces a full re-sync, { heal: true }
+    // re-fetches locally-open invoices by ID to pick up PAID/VOIDED/DELETED
+    // transitions that predate incremental status syncing.
+    const body = await request.json().catch(() => ({}));
+    const parsed = flagsSchema.safeParse(body ?? {});
+    // Flags are optional conveniences, not user input — a malformed body
+    // just degrades to a routine sync rather than 400ing.
+    const flags = parsed.success ? parsed.data : {};
+
+    const { data: conn } = await supabase
+      .from("xero_connections")
+      .select("last_synced_at")
+      .eq("id", connectionId)
+      .single();
+
+    // Sync Now used to force a full sync every time; incremental when we have
+    // a last-sync marker keeps it cheap and picks up status transitions.
+    const isInitial = flags.full === true || !conn?.last_synced_at;
+
+    let healed = 0;
+    if (flags.heal === true) {
+      healed = await healInvoiceStatuses(connectionId);
+    }
+
+    const records = await runSync(connectionId, isInitial);
+    return json({ ok: true, recordsSynced: records, healed });
   } catch (err) {
     return handleError(err);
   }

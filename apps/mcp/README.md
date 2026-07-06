@@ -9,7 +9,7 @@ reuses the same cashflow/forecast computation the web app sees.
 
 | Tool | What it returns |
 |---|---|
-| `get_cashflow` | Monthly cash-in/out by account, opening/closing balances, net movement, "falls below £0" month. Params: `monthsBack`, `monthsForward`. |
+| `get_cashflow` | Monthly cash-in/out by account, opening/closing balances, net movement, "falls below £0" month. Past months are pure cash actuals (bank transactions + invoice payments); the current month blends cash-to-date with a projected remainder; future months are projections. Params: `monthsBack` (max 12), `monthsForward` (max 24). |
 | `get_connection` | Connected Xero org + bank accounts + current balances. |
 | `get_forecast` | Day/week/month forecast periods over a date range, optional scenario overlay. Params: `period`, `from`, `to`, `scenarioIds`. |
 | `list_transactions` | Outstanding invoices/bills with amounts due and dates. Params: `type`, `status`. |

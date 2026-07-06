@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCashflow, triggerSync, setProjectionOverride } from '@/lib/api';
+import { getCashflow, getProjectionOverrides, triggerSync, setProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
 import type { CashflowData, CashflowAccount, CashflowAccountInfo } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -52,7 +52,7 @@ export default function CashflowPage() {
     queryKey: ['cashflow'],
     queryFn: async () => {
       const result = await getCashflow();
-      try { localStorage.setItem('cashflow_cache', JSON.stringify(result)); } catch {}
+      try { localStorage.setItem('cashflow_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
       return result;
     },
     initialData: () => {
@@ -63,6 +63,30 @@ export default function CashflowPage() {
     },
     initialDataUpdatedAt: 0, // always refetch in background
   });
+
+  // Raw override amounts, keyed accountCode|month, so editing a blended cell
+  // seeds from the stored override rather than the displayed value. Warm-started
+  // from localStorage like the cashflow query: a cached grid paints instantly,
+  // and the pre-fill protection must not lag behind it.
+  const { data: overridesData } = useQuery<{ overrides: ProjectionOverrideEntry[] }>({
+    queryKey: ['projection-overrides'],
+    queryFn: async () => {
+      const result = await getProjectionOverrides();
+      try { localStorage.setItem('projection_overrides_cache', JSON.stringify(result)); } catch { /* cache is best-effort */ }
+      return result;
+    },
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem('projection_overrides_cache');
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
+    },
+    initialDataUpdatedAt: 0, // always refetch in background
+  });
+  const overrideAmounts = new Map<string, number>();
+  for (const o of overridesData?.overrides ?? []) {
+    overrideAmounts.set(`${o.accountCode}|${o.month}`, o.amount);
+  }
 
   const syncMutation = useMutation({
     mutationFn: triggerSync,
@@ -83,7 +107,7 @@ export default function CashflowPage() {
   );
   if (!data) return null;
 
-  if (isMobile) return <CashflowMobile data={data} />;
+  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
   const { currentBalance, fallsBelowZeroIn, currentMonthIndex, months, cashIn, cashOut, openingBalance, closingBalance, netCashMovement, accounts = [] } = data;
 
@@ -168,7 +192,7 @@ export default function CashflowPage() {
                 {/* Income section */}
                 <SectionHeader label="↗ Income" open={incomeOpen} onToggle={() => setIncomeOpen(!incomeOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashIn} allAccounts={accounts} existingCodes={cashIn.map(a => a.accountCode)} section="income" />
                 {incomeOpen && cashIn.map((account, idx) => (
-                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} />
+                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
                 ))}
 
                 {/* Spacer between sections */}
@@ -177,7 +201,7 @@ export default function CashflowPage() {
                 {/* Costs section */}
                 <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
                 {costsOpen && cashOut.map((account, idx) => (
-                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} />
+                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
                 ))}
 
                 {/* Net cash movement */}
@@ -245,8 +269,8 @@ function SectionHeader({ label, open, onToggle, months, currentMonthIndex, accou
   );
 }
 
-function AccountRow({ account, months, currentMonthIndex, rowIndex }: {
-  account: CashflowAccount; months: string[]; currentMonthIndex: number; rowIndex: number;
+function AccountRow({ account, months, currentMonthIndex, rowIndex, overrideAmounts }: {
+  account: CashflowAccount; months: string[]; currentMonthIndex: number; rowIndex: number; overrideAmounts: Map<string, number>;
 }) {
   const isAlt = rowIndex % 2 === 1;
   return (
@@ -265,6 +289,7 @@ function AccountRow({ account, months, currentMonthIndex, rowIndex }: {
           previousValue={i > 0 ? account.monthly[i - 1] : undefined}
           months={months}
           monthIndex={i}
+          overrideAmount={overrideAmounts.get(`${account.accountCode}|${m}`)}
         />
       ))}
     </tr>

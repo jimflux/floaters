@@ -42,9 +42,22 @@ export interface XeroLineItem {
   LineAmount: number;
 }
 
+export interface XeroPayment {
+  PaymentID: string;
+  // ACCRECPAYMENT = money in against a sales invoice, ACCPAYPAYMENT = money out
+  // against a bill. Other types (credit note / overpayment / prepayment
+  // payments) carry no Invoice link and are skipped by the sync.
+  PaymentType?: string;
+  Status?: string;
+  Amount: number;
+  Date: string;
+  UpdatedDateUTC?: string;
+  Invoice?: { InvoiceID: string; Type?: string };
+}
+
 export interface XeroBankTransaction {
   BankTransactionID: string;
-  Type: "RECEIVE" | "SPEND" | "RECEIVE-OVERPAYMENT" | "RECEIVE-PREPAYMENT" | "SPEND-OVERPAYMENT" | "SPEND-PREPAYMENT";
+  Type: "RECEIVE" | "SPEND" | "RECEIVE-OVERPAYMENT" | "RECEIVE-PREPAYMENT" | "SPEND-OVERPAYMENT" | "SPEND-PREPAYMENT" | "RECEIVE-TRANSFER" | "SPEND-TRANSFER";
   Contact?: { ContactID: string; Name: string };
   BankAccount: { AccountID: string; Code: string; Name: string };
   Total: number;

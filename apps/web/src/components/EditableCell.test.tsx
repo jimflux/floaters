@@ -83,3 +83,35 @@ describe("EditableCell save (regression for edits looking unsaved)", () => {
     expect(acct.hasOverride[2]).toBe(true);
   });
 });
+
+describe("EditableCell override pre-fill", () => {
+  it("seeds the editor from the stored override, not the blended cell value", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["cashflow"], seedData());
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    // Current-month blend: cell shows 3000 (cash-to-date beat the 2000
+    // override). Opening the editor must show the raw override, otherwise
+    // open-then-save silently ratchets it up to the blend.
+    render(
+      <EditableCell
+        value={3000}
+        accountCode="400"
+        month="2026-06"
+        isProjected={false}
+        hasOverride
+        isCurrentMonth
+        months={["2026-05", "2026-06", "2026-07"]}
+        monthIndex={1}
+        overrideAmount={2000}
+        as="div"
+      />,
+      { wrapper }
+    );
+
+    fireEvent.click(screen.getByRole("button"));
+    const input = await screen.findByRole("spinbutton");
+    expect((input as HTMLInputElement).value).toBe("2000");
+  });
+});

@@ -44,11 +44,11 @@ npm test               # run every workspace's tests
 Single-user API-key auth: the web app and MCP server send `Authorization: Bearer <CONNECT_SECRET>`. `getConnectionId()` in `src/lib/auth.ts` checks the key and returns the one connection's id. (The older Xero-OAuth login flow under `src/app/auth/` still exists for connecting Xero.)
 
 ### Xero Sync
-`src/lib/xero/sync.ts` — initial + incremental sync, rate-limited to ~54 calls/min via `bottleneck`. Syncs accounts, invoices (ACCREC/ACCPAY), and bank transactions. Writes via **batched** `chunkedUpsert()` (500-row chunks) on `(connection_id, xero_id)`. Token refresh is automatic in `src/lib/xero/auth.ts`.
+`src/lib/xero/sync.ts` — initial + incremental sync, rate-limited to ~54 calls/min via `bottleneck`. Syncs accounts, invoices (ACCREC/ACCPAY), bank transactions, and invoice payments (`xero_payments` — payments are NOT bank transactions in Xero). Incremental invoice syncs include PAID/VOIDED/DELETED status transitions; `POST /api/sync` accepts `{ heal: true }` to re-fetch locally-open invoices by ID. Writes via **batched** `chunkedUpsert()` (500-row chunks) on `(connection_id, xero_id)`. Token refresh is automatic in `src/lib/xero/auth.ts`.
 
 ### Forecast / cashflow
 - `src/lib/forecast/engine.ts` — `computeForecast()` projects daily flows from invoice/bill due (or `expected_payment_date`) dates, overlays scenario items, aggregates by period. `getOccurrences()` expands recurrence.
-- `src/app/api/cashflow/route.ts` — the main dashboard endpoint: groups actuals + projections by Xero chart-of-accounts per month, applies manual `projection_overrides` (an actual invoice wins over an override), hides `hidden_accounts`, and computes opening/closing balances.
+- `src/app/api/cashflow/route.ts` — the main dashboard endpoint, on a Float-style basis model: past months are pure cash (bank transactions + invoice payments, signed and scaled to tax-inclusive totals); future months are expected cash (unpaid AUTHORISED/SUBMITTED invoices at remaining `amount_due`, by `expected_payment_date || due_date`, overdue floored to the current month); the current month blends cash-to-date with a projected remainder (invoices win by presence, then `projection_overrides` treated as expected month totals, then the 3-month cost average). Hidden accounts stay in nets/balances but not rows. The balance walk anchors on today's bank balance; the current month's closing is a projected month-end.
 
 ### Conventions
 - Routes return JSON via `json()` / `error()` from `src/lib/api-helpers.ts`, which set **`Cache-Control: no-store`** (this is a live financial read — never cache it).

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { setProjectionOverride, removeProjectionOverride } from '@/lib/api';
+import { setProjectionOverride, removeProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -25,11 +25,15 @@ interface EditableCellProps {
   previousValue?: number;
   months: string[];
   monthIndex: number;
+  // The stored override amount. The displayed value can be a blend (current
+  // month: cash-to-date + remainder), so editing must seed from the raw
+  // override or an open-then-save would silently ratchet it up.
+  overrideAmount?: number;
   as?: 'td' | 'div';
 }
 
 export default function EditableCell({
-  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, as = 'td',
+  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, overrideAmount, as = 'td',
 }: EditableCellProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -38,20 +42,28 @@ export default function EditableCell({
 
   useEffect(() => {
     if (open) {
-      setInputValue(String(Math.round(value)));
+      const seed = hasOverride && overrideAmount !== undefined ? overrideAmount : value;
+      setInputValue(String(Math.round(seed)));
       setTimeout(() => inputRef.current?.select(), 50);
     }
-  }, [open, value]);
+  }, [open, value, hasOverride, overrideAmount]);
 
   // Optimistically apply override amounts to specific month indices for this
   // account, returning a snapshot so onError can roll back. The canonical
   // react-query pattern: patch in onMutate (before the request), invalidate in
   // onSettled. This makes the edit appear instantly and survive the refetch,
   // instead of flickering back when a slow/stale refetch lands.
-  type MonthPatch = { index: number; amount: number };
-  const applyOptimisticOverride = async (patches: MonthPatch[]) => {
+  // The raw overrides cache gets the same treatment: it seeds the editor, so
+  // leaving it stale would pre-fill the pre-edit amount if the cell is
+  // reopened before the save round-trip settles.
+  type MonthPatch = { index: number; month: string; amount: number };
+  type OverridesCache = { overrides: ProjectionOverrideEntry[] };
+  type Snapshot = { previous?: CashflowData; previousOverrides?: OverridesCache };
+  const applyOptimisticOverride = async (patches: MonthPatch[]): Promise<Snapshot> => {
     await queryClient.cancelQueries({ queryKey: ['cashflow'] });
+    await queryClient.cancelQueries({ queryKey: ['projection-overrides'] });
     const previous = queryClient.getQueryData<CashflowData>(['cashflow']);
+    const previousOverrides = queryClient.getQueryData<OverridesCache>(['projection-overrides']);
     queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
       if (!old) return old;
       const patchAccounts = (accounts: CashflowAccount[]) =>
@@ -69,21 +81,35 @@ export default function EditableCell({
         });
       return { ...old, cashIn: patchAccounts(old.cashIn), cashOut: patchAccounts(old.cashOut) };
     });
-    return { previous };
+    queryClient.setQueryData<OverridesCache>(['projection-overrides'], (old) => {
+      if (!old) return old;
+      const overrides = [...old.overrides];
+      for (const { month: patchMonth, amount } of patches) {
+        const i = overrides.findIndex(o => o.accountCode === accountCode && o.month === patchMonth);
+        if (i >= 0) overrides[i] = { ...overrides[i], amount };
+        else overrides.push({ accountCode, month: patchMonth, amount });
+      }
+      return { ...old, overrides };
+    });
+    return { previous, previousOverrides };
   };
 
-  const rollback = (ctx: { previous?: CashflowData } | undefined) => {
+  const rollback = (ctx: Snapshot | undefined) => {
     if (ctx?.previous) queryClient.setQueryData(['cashflow'], ctx.previous);
+    if (ctx?.previousOverrides) queryClient.setQueryData(['projection-overrides'], ctx.previousOverrides);
   };
 
-  const settle = () => { queryClient.invalidateQueries({ queryKey: ['cashflow'] }); };
+  const settle = () => {
+    queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+    queryClient.invalidateQueries({ queryKey: ['projection-overrides'] });
+  };
 
   const saveMutation = useMutation({
     mutationFn: (amount: number) => setProjectionOverride(accountCode, month, amount),
     onMutate: (amount: number) => {
       const monthIdx = queryClient.getQueryData<CashflowData>(['cashflow'])?.months.indexOf(month) ?? -1;
       setOpen(false);
-      return applyOptimisticOverride([{ index: monthIdx, amount }]);
+      return applyOptimisticOverride([{ index: monthIdx, month, amount }]);
     },
     onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to save override'); },
     onSuccess: () => toast.success('Override saved'),
@@ -95,9 +121,9 @@ export default function EditableCell({
       months.slice(monthIndex).map(targetMonth => setProjectionOverride(accountCode, targetMonth, amount))
     ),
     onMutate: (amount: number) => {
-      const total = queryClient.getQueryData<CashflowData>(['cashflow'])?.months.length ?? months.length;
+      const cacheMonths = queryClient.getQueryData<CashflowData>(['cashflow'])?.months ?? months;
       const patches: MonthPatch[] = [];
-      for (let i = monthIndex; i < total; i += 1) patches.push({ index: i, amount });
+      for (let i = monthIndex; i < cacheMonths.length; i += 1) patches.push({ index: i, month: cacheMonths[i], amount });
       setOpen(false);
       return applyOptimisticOverride(patches);
     },
@@ -107,11 +133,22 @@ export default function EditableCell({
   });
 
   // Reset reverts to the server's auto-projection (3-month average / invoice-only),
-  // which we can't compute client-side — so we just refetch on settle.
+  // which we can't compute client-side, so the cell value just refetches on
+  // settle. The raw override entry is removed optimistically, though, so a
+  // reopened editor doesn't seed from the deleted override.
   const resetMutation = useMutation({
     mutationFn: () => removeProjectionOverride(accountCode, month),
-    onMutate: () => { setOpen(false); },
-    onError: () => toast.error('Failed to remove override'),
+    onMutate: async (): Promise<Snapshot> => {
+      setOpen(false);
+      await queryClient.cancelQueries({ queryKey: ['projection-overrides'] });
+      const previousOverrides = queryClient.getQueryData<OverridesCache>(['projection-overrides']);
+      queryClient.setQueryData<OverridesCache>(['projection-overrides'], (old) => {
+        if (!old) return old;
+        return { ...old, overrides: old.overrides.filter(o => !(o.accountCode === accountCode && o.month === month)) };
+      });
+      return { previousOverrides };
+    },
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to remove override'); },
     onSuccess: () => toast.success('Override removed'),
     onSettled: settle,
   });
