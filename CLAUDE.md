@@ -48,7 +48,7 @@ Single-user API-key auth: the web app and MCP server send `Authorization: Bearer
 
 ### Forecast / cashflow
 - `src/lib/forecast/engine.ts` — `computeForecast()` projects daily flows from invoice/bill due (or `expected_payment_date`) dates, overlays scenario items, aggregates by period. `getOccurrences()` expands recurrence.
-- `src/app/api/cashflow/route.ts` — the main dashboard endpoint, on a Float-style basis model: past months are pure cash (bank transactions + invoice payments, signed and scaled to tax-inclusive totals); future months are expected cash (unpaid AUTHORISED/SUBMITTED invoices at remaining `amount_due`, by `expected_payment_date || due_date`, overdue floored to the current month); the current month blends cash-to-date with a projected remainder (invoices win by presence, then `projection_overrides` treated as expected month totals, then the 3-month cost average). Hidden accounts stay in nets/balances but not rows. The balance walk anchors on today's bank balance; the current month's closing is a projected month-end.
+- `src/app/api/cashflow/route.ts` — the main dashboard endpoint. **Income is a pipeline rolled up by client** (not account rows): three layers per client per month — paid (whole ACCREC payment amounts plus non-invoice income), invoiced (remaining `amount_due` of open ACCREC invoices at `expected_payment_date || due_date`, overdue floored to the current month and flagged), projected (unfulfilled `income_projections` remainders at their expected month; lapse is derived, never stored). Client keys are explicit (`contact:<id>` / `label:<normalised>` / `UNASSIGNED`); shared semantics live in `src/lib/pipeline.ts`. **Costs keep the account model**: past = signed cash scaled to tax-inclusive totals, current month blends cash-to-date with a remainder (bills win by presence, then `projection_overrides`, then the 3-month cost average — overrides are costs-only since the pipeline cutover). Two balance walks anchored on today's bank balance: committed (cash + invoices sent + cost forecasts; drives `fallsBelowZeroIn`) and optimistic (committed + projection remainders); identical over history. Known limitation: an invoice settled by credit note clears the invoiced layer with no paid-layer cash, and its total still consumes its projection's remainder, so a credit-noted chain can bypass the lapse signal.
 
 ### Conventions
 - Routes return JSON via `json()` / `error()` from `src/lib/api-helpers.ts`, which set **`Cache-Control: no-store`** (this is a live financial read — never cache it).
@@ -57,7 +57,7 @@ Single-user API-key auth: the web app and MCP server send `Authorization: Bearer
 - `src/middleware.ts` handles CORS for the web origins.
 
 ### Database
-Key tables: `xero_connections`, `xero_invoices`, `xero_bank_transactions`, `xero_accounts`, `scenarios`, `scenario_items`, `budgets`, `budget_lines`, `cash_thresholds`, `account_groups`, `hidden_accounts`, `projection_overrides`, `sync_log`. Migrations in `apps/api/supabase/migrations/`.
+Key tables: `xero_connections`, `xero_invoices` (carries local columns `expected_payment_date`, `projection_id`, `reviewed_at` — omitted from sync upserts so they survive re-sync), `xero_payments`, `xero_bank_transactions`, `xero_accounts`, `income_projections`, `scenarios`, `scenario_items`, `budgets`, `budget_lines`, `cash_thresholds`, `account_groups`, `hidden_accounts`, `projection_overrides` (costs only since the pipeline cutover), `sync_log`. Migrations in `apps/api/supabase/migrations/`.
 
 ## Web app (`apps/web`)
 
@@ -65,7 +65,7 @@ React Query for data; the cashflow query is `['cashflow']`. Editable projection 
 
 ## MCP server (`apps/mcp`)
 
-Read-only. Tools (`get_cashflow`, `get_connection`, `get_forecast`, `list_transactions`) are GETs against the API, so the server can't mutate anything. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. See `apps/mcp/README.md` for the OpenClaw setup.
+Read-only. Tools (`get_cashflow`, `get_income_pipeline`, `get_connection`, `get_forecast`, `list_transactions`) are GETs against the API, so the server can't mutate anything. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. See `apps/mcp/README.md` for the OpenClaw setup.
 
 ## Deployment
 

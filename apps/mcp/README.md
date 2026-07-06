@@ -9,9 +9,10 @@ reuses the same cashflow/forecast computation the web app sees.
 
 | Tool | What it returns |
 |---|---|
-| `get_cashflow` | Monthly cash-in/out by account, opening/closing balances, net movement, "falls below £0" month. Past months are pure cash actuals (bank transactions + invoice payments); the current month blends cash-to-date with a projected remainder; future months are projections. Params: `monthsBack` (max 12), `monthsForward` (max 24). |
+| `get_cashflow` | Monthly cashflow: income as three layers per client (paid / invoiced / projected, explicit client keys), costs by account, and two balance walks — committed (the headline, never includes hope; drives "falls below £0") and optimistic (adds unfulfilled projection remainders). Past months are pure cash. Params: `monthsBack` (max 12), `monthsForward` (max 24). |
+| `get_income_pipeline` | Item-level income pipeline: projections with remainders and derived lapsed flags, unreviewed invoices awaiting triage, and known client contacts. Same client keys as `get_cashflow`. |
 | `get_connection` | Connected Xero org + bank accounts + current balances. |
-| `get_forecast` | Day/week/month forecast periods over a date range, optional scenario overlay. Params: `period`, `from`, `to`, `scenarioIds`. |
+| `get_forecast` | Day/week/month forecast periods over a date range, optional scenario overlay. Predates the pipeline model (no projections, no overdue roll-forward). Params: `period`, `from`, `to`, `scenarioIds`. |
 | `list_transactions` | Outstanding invoices/bills with amounts due and dates. Params: `type`, `status`. |
 
 ## Configuration
