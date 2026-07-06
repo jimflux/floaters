@@ -189,7 +189,7 @@ describe("projections manager", () => {
     renderPanel(qc);
 
     fireEvent.mouseDown(screen.getByText("Projections"));
-    expect(await screen.findByText(/Lapsed — re-date or delete/)).toBeInTheDocument();
+    expect(await screen.findByText(/Lapsed, re-date or delete/)).toBeInTheDocument();
     expect(screen.getByText("Ghost Co")).toBeInTheDocument();
 
     // Re-date Ghost Co (first row in the lapsed group)

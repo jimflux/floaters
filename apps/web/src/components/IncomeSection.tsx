@@ -93,7 +93,7 @@ export default function IncomeSection({
           {income.clients.length === 0 ? (
             <tr className="border-b border-border">
               <td className="sticky left-0 z-10 bg-card px-3 py-1.5 text-xs pl-7 text-muted-foreground italic" colSpan={1}>
-                No income yet — add a projection to start
+                No income yet. Add a projection to start
               </td>
               {months.map(m => (
                 <td key={m} />

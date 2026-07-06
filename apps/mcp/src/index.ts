@@ -32,7 +32,7 @@ server.registerTool(
   {
     title: "Get cash flow",
     description:
-      "Monthly cashflow with income as a pipeline rolled up by client and costs grouped by Xero chart-of-accounts. Income has three layers per client per month: paid (cash received), invoiced (promises — remaining amount due, overdue rolled into the current month and flagged), and projected (unfulfilled projection remainders at their expected month). Client keys are explicit ('contact:<id>', 'label:<normalised>', or 'UNASSIGNED' for non-invoice income). Two balance walks: committed (cash + invoices sent + cost forecasts — the headline; fallsBelowZeroIn reads this and never includes hope) and optimistic (committed plus projection remainders; optimisticFallsBelowZeroIn). Both are identical over history. Past months are pure cash; the current month blends cash-to-date with a projected remainder; costs use bills by expected/due date, manual overrides, then a 3-month average. Note: get_forecast uses a separate engine that predates the pipeline model.",
+      "Monthly cashflow with income as a pipeline rolled up by client and costs grouped by Xero chart-of-accounts. Income has three layers per client per month: paid (cash received), invoiced (promises: remaining amount due, overdue rolled into the current month and flagged), and projected (unfulfilled projection remainders at their expected month). Client keys are explicit ('contact:<id>', 'label:<normalised>', or 'UNASSIGNED' for non-invoice income). Two balance walks: committed (cash plus invoices sent plus cost forecasts; the headline, so fallsBelowZeroIn reads this and never includes hope) and optimistic (committed plus projection remainders; optimisticFallsBelowZeroIn). Both are identical over history. Past months are pure cash; the current month blends cash-to-date with a projected remainder; costs use bills by expected/due date, manual overrides, then a 3-month average. Note: get_forecast uses a separate engine that predates the pipeline model.",
     inputSchema: {
       monthsBack: z
         .number()
@@ -40,7 +40,7 @@ server.registerTool(
         .min(0)
         .max(12)
         .optional()
-        .describe("Historical months to include (default 3, max 12 — the synced history depth)."),
+        .describe("Historical months to include (default 3, max 12, the synced history depth)."),
       monthsForward: z
         .number()
         .int()
@@ -66,7 +66,7 @@ server.registerTool(
   {
     title: "Get income pipeline",
     description:
-      "Item-level view of the income pipeline: projections (client key as used by get_cashflow, VAT-inclusive amount, expected month, remainder after assigned invoices, derived lapsed flag, assigned invoice ids), unreviewed invoices awaiting triage (with overdue flags), and the known client contacts. Lapsed projections are hope whose expected month passed unfulfilled — they are excluded from the optimistic balance line until re-dated or deleted.",
+      "Item-level view of the income pipeline: projections (client key as used by get_cashflow, VAT-inclusive amount, expected month, remainder after assigned invoices, derived lapsed flag, assigned invoice ids), unreviewed invoices awaiting triage (with overdue flags), and the known client contacts. Lapsed projections are hope whose expected month passed unfulfilled; they are excluded from the optimistic balance line until re-dated or deleted.",
     inputSchema: {},
   },
   async () => {

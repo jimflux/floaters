@@ -50,6 +50,8 @@ export async function PATCH(
     }
 
     // After `reviewed` so assignment-implies-review wins over reviewed: false.
+    // Deferred: only re-key the projection once the assignment has persisted.
+    let contactBackfillId: string | null = null;
     if (parsed.data.projectionId !== undefined) {
       if (parsed.data.projectionId === null) {
         // Unassign releases the link; the invoice stays reviewed.
@@ -71,16 +73,11 @@ export async function PATCH(
         // Assignment implies review.
         patch.reviewed_at = new Date().toISOString();
 
-        // R15: a contact-less projection adopts the invoice's contact.
+        // R15: a contact-less projection adopts the invoice's contact — but
+        // only after the assignment below succeeds, so a failed invoice
+        // update can never silently re-key the projection's client rollup.
         if (!projection.contact_id && invoice.contact_id) {
-          await supabase
-            .from("income_projections")
-            .update({
-              contact_id: invoice.contact_id,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", projection.id)
-            .eq("connection_id", connectionId);
+          contactBackfillId = invoice.contact_id as string;
         }
       }
     }
@@ -95,6 +92,17 @@ export async function PATCH(
 
     if (dbError || !data) {
       return error("Invoice not found", 404);
+    }
+
+    if (contactBackfillId && patch.projection_id) {
+      await supabase
+        .from("income_projections")
+        .update({
+          contact_id: contactBackfillId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", patch.projection_id as string)
+        .eq("connection_id", connectionId);
     }
 
     return json(data);

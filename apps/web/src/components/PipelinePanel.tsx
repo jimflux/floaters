@@ -107,7 +107,7 @@ function ReviewTab({ pipeline }: { pipeline: PipelineResponse | undefined }) {
       setSelected(new Set());
       return snapshot(removeRows(ids));
     },
-    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to approve — restored'); },
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to approve, restored to the tray'); },
     onSuccess: (_d, ids) => toast.success(ids.length > 1 ? `${ids.length} invoices approved` : 'Invoice approved'),
     onSettled: settle,
   });
@@ -116,13 +116,13 @@ function ReviewTab({ pipeline }: { pipeline: PipelineResponse | undefined }) {
     mutationFn: ({ invoiceId, projectionId }: { invoiceId: string; projectionId: string }) =>
       reviewInvoice(invoiceId, { projectionId }),
     onMutate: ({ invoiceId }) => snapshot(removeRows([invoiceId])),
-    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to assign — restored'); },
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to assign, restored to the tray'); },
     onSuccess: () => toast.success('Invoice assigned to projection'),
     onSettled: settle,
   });
 
   if (unreviewed.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">Nothing to review — all caught up.</p>;
+    return <p className="text-sm text-muted-foreground py-8 text-center">Nothing to review. All caught up.</p>;
   }
 
   const allSelected = selected.size === unreviewed.length && unreviewed.length > 0;
@@ -228,7 +228,8 @@ function ReviewRow({ invoice, projections, checked, onCheck, onApprove, onAssign
                   {ordered.map(p => (
                     <CommandItem
                       key={p.id}
-                      value={`${p.clientLabel} ${p.expectedMonth}`}
+                      value={p.id}
+                      keywords={[p.clientLabel, formatMonth(p.expectedMonth)]}
                       onSelect={() => { setPickerOpen(false); onAssign(p.id); }}
                       className="text-xs"
                     >
@@ -260,12 +261,12 @@ function ProjectionsTab({ pipeline }: { pipeline: PipelineResponse | undefined }
       <CreateProjectionForm contacts={pipeline?.contacts ?? []} />
 
       {projections.length === 0 && (
-        <p className="text-sm text-muted-foreground py-4 text-center">No projections yet — add your first above.</p>
+        <p className="text-sm text-muted-foreground py-4 text-center">No projections yet. Add your first above.</p>
       )}
 
       {lapsed.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-amber-600 mb-2">Lapsed — re-date or delete</p>
+          <p className="text-xs font-medium text-amber-600 mb-2">Lapsed, re-date or delete</p>
           <div className="space-y-2">
             {lapsed.map(p => <ProjectionRow key={p.id} projection={p} lapsed />)}
           </div>
@@ -335,7 +336,8 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
                 {contacts.map(c => (
                   <CommandItem
                     key={c.contactId}
-                    value={c.name || c.contactId}
+                    value={c.contactId}
+                    keywords={c.name ? [c.name] : undefined}
                     onSelect={() => {
                       setLabel(c.name || c.contactId);
                       setContactId(c.contactId);
@@ -386,7 +388,7 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
             : p
         ),
       })),
-    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to re-date — restored'); },
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to re-date, restored'); },
     onSuccess: () => toast.success('Projection re-dated'),
     onSettled: settle,
   });
@@ -395,8 +397,8 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
     mutationFn: () => deleteProjection(projection.id),
     onMutate: () =>
       snapshot(old => ({ ...old, projections: old.projections.filter(p => p.id !== projection.id) })),
-    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to delete — restored'); },
-    onSuccess: () => toast.success('Projection deleted — its invoices stay as standalone'),
+    onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to delete, restored'); },
+    onSuccess: () => toast.success('Projection deleted, its invoices stay as standalone'),
     onSettled: settle,
   });
 
