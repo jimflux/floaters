@@ -102,13 +102,23 @@ function ReviewTab({ pipeline }: { pipeline: PipelineResponse | undefined }) {
   });
 
   const approveMutation = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map(id => reviewInvoice(id, { reviewed: true }))).then(() => undefined),
+    // allSettled, not all: a partial failure must not report "nothing approved"
+    // when most succeeded. The onSettled refetch reconciles which rows survive.
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map(id => reviewInvoice(id, { reviewed: true })));
+      return { total: ids.length, failed: results.filter(r => r.status === 'rejected').length };
+    },
     onMutate: (ids: string[]) => {
       setSelected(new Set());
       return snapshot(removeRows(ids));
     },
     onError: (_e, _v, ctx) => { rollback(ctx); toast.error('Failed to approve, restored to the tray'); },
-    onSuccess: (_d, ids) => toast.success(ids.length > 1 ? `${ids.length} invoices approved` : 'Invoice approved'),
+    onSuccess: ({ total, failed }) => {
+      const ok = total - failed;
+      if (failed === 0) toast.success(total > 1 ? `${total} invoices approved` : 'Invoice approved');
+      else if (ok === 0) toast.error('Failed to approve, restored to the tray');
+      else toast.warning(`${ok} approved, ${failed} failed and stayed in the tray`);
+    },
     onSettled: settle,
   });
 

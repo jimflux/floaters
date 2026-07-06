@@ -26,18 +26,20 @@ vi.mock("@/lib/supabase", () => {
       is: (c: string, v: unknown) => (filters.push((r) => r[c] === v), builder),
       not: (c: string, op: string, v: unknown) =>
         (filters.push((r) => !(r[c] === (v === "null" ? null : v))), builder),
-      // Parse the exact or-string the route builds: open statuses, or PAID
-      // within the cutoff window.
+      // Parse the exact or-string the route builds: open statuses, PAID within
+      // the cutoff window, or PAID with a null fully_paid_on_date.
       or: (expr: string) => {
         const statuses = /status\.in\.\(([^)]*)\)/.exec(expr)?.[1].split(",") ?? [];
         const cutoff = /fully_paid_on_date\.gte\.([\d-]+)/.exec(expr)?.[1];
+        const paidNull = /status\.eq\.PAID,fully_paid_on_date\.is\.null/.test(expr);
         filters.push(
           (r) =>
             statuses.includes(r.status as string) ||
             (r.status === "PAID" &&
               typeof r.fully_paid_on_date === "string" &&
               cutoff !== undefined &&
-              (r.fully_paid_on_date as string) >= cutoff)
+              (r.fully_paid_on_date as string) >= cutoff) ||
+            (paidNull && r.status === "PAID" && r.fully_paid_on_date == null)
         );
         return builder;
       },
@@ -101,11 +103,14 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("GET /api/pipeline", () => {
-  it("tray filter: open ACCREC and recently PAID in; DRAFT, ACCPAY, old PAID, VOIDED out", async () => {
+  it("tray filter: open ACCREC, recently PAID and null-date PAID in; DRAFT, ACCPAY, old PAID, VOIDED out", async () => {
     state.invoices = [
       invoice({ xero_id: "open", status: "AUTHORISED" }),
       invoice({ xero_id: "submitted", status: "SUBMITTED" }),
       invoice({ xero_id: "paid-recent", status: "PAID", fully_paid_on_date: "2026-06-01" }),
+      // Xero can leave FullyPaidOnDate null (e.g. credit-note settlement) — the
+      // cash still needs assigning, so it must surface while unreviewed.
+      invoice({ xero_id: "paid-nulldate", status: "PAID", fully_paid_on_date: null }),
       invoice({ xero_id: "paid-old", status: "PAID", fully_paid_on_date: "2026-04-01" }),
       invoice({ xero_id: "draft", status: "DRAFT" }),
       invoice({ xero_id: "voided", status: "VOIDED" }),
@@ -115,6 +120,7 @@ describe("GET /api/pipeline", () => {
     const res = await run();
     expect(res.unreviewed.map((i) => i.xeroId).sort()).toEqual([
       "open",
+      "paid-nulldate",
       "paid-recent",
       "submitted",
     ]);

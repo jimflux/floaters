@@ -49,7 +49,11 @@ export async function GET() {
           .eq("connection_id", connectionId)
           .not("projection_id", "is", null),
         // R17 tray filter: unreviewed ACCREC in AUTHORISED/SUBMITTED, or PAID
-        // within the last 30 days. DRAFT/ACCPAY/VOIDED/DELETED never.
+        // recently. DRAFT/ACCPAY/VOIDED/DELETED never. PAID rows count when
+        // paid within the last 30 days OR when Xero left fully_paid_on_date
+        // null (credit-note settlement, data gaps) — otherwise that cash could
+        // never be assigned to its projection. The reviewed_at IS NULL filter
+        // already bounds this to freshly-synced rows, so it can't flood.
         supabase
           .from("xero_invoices")
           .select(
@@ -59,7 +63,7 @@ export async function GET() {
           .eq("type", "ACCREC")
           .is("reviewed_at", null)
           .or(
-            `status.in.(${TRAY_OPEN_STATUSES.join(",")}),and(status.eq.PAID,fully_paid_on_date.gte.${paidCutoff})`
+            `status.in.(${TRAY_OPEN_STATUSES.join(",")}),and(status.eq.PAID,fully_paid_on_date.gte.${paidCutoff}),and(status.eq.PAID,fully_paid_on_date.is.null)`
           ),
         // Client picker source: contacts seen on ACCREC invoices, most recent first.
         supabase

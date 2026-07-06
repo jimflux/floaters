@@ -22,7 +22,6 @@ interface Props {
 
 export default function AccountManagementPanel({ open, onOpenChange, accounts }: Props) {
   const queryClient = useQueryClient();
-  const incomeAccounts = accounts.filter(a => a.section === 'income');
   const costAccounts = accounts.filter(a => a.section === 'costs');
 
   return (
@@ -38,7 +37,6 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts }:
           </TabsList>
           <TabsContent value="accounts" className="flex-1 overflow-y-auto px-6 pb-6">
             <AccountsTab
-              incomeAccounts={incomeAccounts}
               costAccounts={costAccounts}
               queryClient={queryClient}
             />
@@ -53,15 +51,16 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts }:
 }
 
 function AccountsTab({
-  incomeAccounts, costAccounts, queryClient,
+  costAccounts, queryClient,
 }: {
-  incomeAccounts: CashflowAccountInfo[];
   costAccounts: CashflowAccountInfo[];
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
+  // Income is rolled up by client now, not account rows, so hiding an income
+  // account would change nothing on the grid. Only cost accounts still have a
+  // meaningful visibility toggle.
   return (
     <div className="space-y-4">
-      <AccountSection label="Income Accounts" accounts={incomeAccounts} queryClient={queryClient} />
       <AccountSection label="Cost Accounts" accounts={costAccounts} queryClient={queryClient} />
     </div>
   );
