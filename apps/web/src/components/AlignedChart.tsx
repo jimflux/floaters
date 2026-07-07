@@ -33,7 +33,16 @@ interface AlignedChartProps {
   primaryLabel?: string;
   secondaryLabel?: string;
   secondaryStroke?: string;
+  // Optional third line: true spendable cash net of VAT owed. Drawn thin from
+  // the current month forward when supplied and it diverges from committed.
+  adjustedClosing?: number[];
+  adjustedLabel?: string;
+  adjustedStroke?: string;
 }
+
+// Spendable-after-VAT line: emerald, distinct from committed (foreground) and
+// optimistic (amber).
+const ADJUSTED_STROKE = 'hsl(160 84% 39%)';
 
 export default function AlignedChart({
   months,
@@ -45,21 +54,26 @@ export default function AlignedChart({
   primaryLabel = 'Committed',
   secondaryLabel = 'If projections land',
   secondaryStroke = OPTIMISTIC_STROKE,
+  adjustedClosing,
+  adjustedLabel = 'Spendable (net VAT)',
+  adjustedStroke = ADJUSTED_STROKE,
 }: AlignedChartProps) {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; month: string; value: number; optimistic: number } | null>(null);
 
   const chartValues = months.map((_, i) => closingBalance[i] ?? closingBalance[closingBalance.length - 1] ?? 0);
   const optValues = months.map((_, i) => optimisticClosing?.[i] ?? chartValues[i]);
+  const adjValues = adjustedClosing ? months.map((_, i) => adjustedClosing[i] ?? chartValues[i]) : null;
   // Both walks share an identical history; the band only exists when
   // projections actually separate them.
   const hasDivergence = optValues.some((v, i) => Math.abs(v - chartValues[i]) > 0.005);
+  const hasAdjusted = adjValues !== null && adjValues.some((v, i) => Math.abs(v - chartValues[i]) > 0.005);
 
   const halfCol = colWidth / 2;
   const svgWidth = months.length * colWidth;
   const plotHeight = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
 
-  const minVal = Math.min(...chartValues, ...optValues);
-  const maxVal = Math.max(...chartValues, ...optValues);
+  const minVal = Math.min(...chartValues, ...optValues, ...(adjValues ?? []));
+  const maxVal = Math.max(...chartValues, ...optValues, ...(adjValues ?? []));
   const rawRange = maxVal - Math.min(0, minVal) || 1;
 
   // Nice step algorithm
@@ -112,6 +126,12 @@ export default function AlignedChart({
   // divergent stretch is drawn — from the previous month's anchor onward.
   const optFutPoints = optPoints.slice(Math.max(currentMonthIndex - 1, 0));
   const optLine = optFutPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+  // VAT-adjusted (spendable) line: identical to committed over history, drawn
+  // thin from the previous month's anchor forward.
+  const adjPoints = adjValues ? adjValues.map((v, i) => ({ x: toX(i), y: toY(v) })) : null;
+  const adjFutPoints = adjPoints ? adjPoints.slice(Math.max(currentMonthIndex - 1, 0)) : [];
+  const adjLine = adjFutPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
   // The band between committed and optimistic: forward along committed,
   // back along optimistic.
@@ -184,6 +204,11 @@ export default function AlignedChart({
           <path data-testid="optimistic-line" d={optLine} fill="none" stroke={secondaryStroke} strokeWidth={1.5} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
         )}
 
+        {/* VAT-adjusted (spendable) line (thin, dotted) */}
+        {hasAdjusted && adjFutPoints.length > 1 && (
+          <path data-testid="adjusted-line" d={adjLine} fill="none" stroke={adjustedStroke} strokeWidth={1.5} strokeDasharray="1 3" vectorEffect="non-scaling-stroke" />
+        )}
+
         {/* Tooltip crosshair (the dot is an HTML overlay below) */}
         {tooltip && (
           <line x1={tooltip.x} x2={tooltip.x} y1={PADDING_TOP} y2={PADDING_TOP + plotHeight} stroke="hsl(var(--muted-foreground))" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
@@ -227,17 +252,25 @@ export default function AlignedChart({
         />
       )}
 
-      {/* Legend: only when the lines actually separate */}
-      {hasDivergence && (
+      {/* Legend: only when at least one extra line separates from committed */}
+      {(hasDivergence || hasAdjusted) && (
         <div className="absolute top-1 right-2 flex items-center gap-3 text-[10px] text-muted-foreground bg-card/80 rounded px-1.5 py-0.5 pointer-events-none">
           <span className="flex items-center gap-1">
             <span className="inline-block w-3 border-t-2 border-foreground" />
             {primaryLabel}
           </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: secondaryStroke }} />
-            {secondaryLabel}
-          </span>
+          {hasDivergence && (
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: secondaryStroke }} />
+              {secondaryLabel}
+            </span>
+          )}
+          {hasAdjusted && (
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-3 border-t-2 border-dotted" style={{ borderColor: adjustedStroke }} />
+              {adjustedLabel}
+            </span>
+          )}
         </div>
       )}
 

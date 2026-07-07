@@ -127,7 +127,7 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing } = data;
   const currentMonth = months[currentMonthIndex];
   const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
 
@@ -203,6 +203,12 @@ export default function CashflowPage() {
                     </p>
                   )}
                 </div>
+                {vatOwedNow != null && (
+                  <div title="Output VAT accrued on issued invoices this quarter, not yet paid to HMRC">
+                    <p className="text-xs text-muted-foreground mb-1">VAT owed</p>
+                    <p className="text-2xl font-bold tracking-tight tabular-nums">{formatGBP(vatOwedNow)}</p>
+                  </div>
+                )}
               </div>
 
               {/* Chart area — scrolls with table */}
@@ -217,6 +223,7 @@ export default function CashflowPage() {
                   primaryLabel={projected ? 'Projected' : 'Committed'}
                   secondaryLabel={secondaryFallsLabel}
                   secondaryStroke={projected ? SECONDARY_STROKE_PROJECTED : SECONDARY_STROKE_COMMITTED}
+                  adjustedClosing={vatAdjustedClosing}
                 />
               </div>
             </div>
@@ -334,25 +341,41 @@ function AccountRow({ account, months, currentMonthIndex, rowIndex, overrideAmou
   account: CashflowAccount; months: string[]; currentMonthIndex: number; rowIndex: number; overrideAmounts: Map<string, number>;
 }) {
   const isAlt = rowIndex % 2 === 1;
+  // The VAT bill is calculated, not entered: render read-only cells (no
+  // EditableCell, which would write a cost override on click).
+  const readOnly = account.accountCode === 'VAT_LIABILITY';
   return (
     <tr className={`border-b border-border hover:bg-muted/10 ${isAlt ? 'bg-row-alt' : ''}`}>
-      <td className={`sticky left-0 z-10 px-3 py-1.5 text-xs pl-7 truncate ${isAlt ? 'bg-row-alt' : 'bg-card'}`}>{account.accountName}</td>
-      {months.map((m, i) => (
-        <EditableCell
-          key={m}
-          value={account.monthly[i]}
-          accountCode={account.accountCode}
-          month={m}
-          isProjected={account.isProjected[i]}
-          hasOverride={account.hasOverride?.[i] ?? false}
-          isCurrentMonth={i === currentMonthIndex}
-          isAltRow={isAlt}
-          previousValue={i > 0 ? account.monthly[i - 1] : undefined}
-          months={months}
-          monthIndex={i}
-          overrideAmount={overrideAmounts.get(`${account.accountCode}|${m}`)}
-        />
-      ))}
+      <td className={`sticky left-0 z-10 px-3 py-1.5 text-xs pl-7 truncate ${isAlt ? 'bg-row-alt' : 'bg-card'}`}>
+        {account.accountName}
+        {readOnly && <span className="ml-1 text-muted-foreground" title="Calculated automatically from your VAT settings">🔒</span>}
+      </td>
+      {months.map((m, i) =>
+        readOnly ? (
+          <td
+            key={m}
+            title="VAT is calculated automatically"
+            className={`px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground cursor-default ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+          >
+            {account.monthly[i] ? formatGBP(account.monthly[i]) : ''}
+          </td>
+        ) : (
+          <EditableCell
+            key={m}
+            value={account.monthly[i]}
+            accountCode={account.accountCode}
+            month={m}
+            isProjected={account.isProjected[i]}
+            hasOverride={account.hasOverride?.[i] ?? false}
+            isCurrentMonth={i === currentMonthIndex}
+            isAltRow={isAlt}
+            previousValue={i > 0 ? account.monthly[i - 1] : undefined}
+            months={months}
+            monthIndex={i}
+            overrideAmount={overrideAmounts.get(`${account.accountCode}|${m}`)}
+          />
+        )
+      )}
     </tr>
   );
 }

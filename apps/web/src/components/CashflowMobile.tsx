@@ -53,7 +53,7 @@ interface Props {
 
 export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing } = data;
 
   const [view, setView] = useForecastView();
   const projected = view === 'projected';
@@ -157,6 +157,12 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
         {secondaryFallsBelow !== primaryFallsBelow && (
           <p className="text-xs text-muted-foreground mt-0.5">{secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}</p>
         )}
+        {vatOwedNow != null && (
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-xs text-muted-foreground">VAT owed:</span>
+            <span className="text-sm font-semibold tabular-nums">{formatGBP(vatOwedNow)}</span>
+          </div>
+        )}
       </div>
 
       {/* Chart */}
@@ -170,6 +176,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
           primaryLabel={projected ? 'Projected' : 'Committed'}
           secondaryLabel={secondaryFallsLabel}
           secondaryStroke={projected ? SECONDARY_STROKE_PROJECTED : SECONDARY_STROKE_COMMITTED}
+          adjustedClosing={vatAdjustedClosing}
         />
       </div>
 
@@ -352,24 +359,34 @@ function SectionHeaderMobile({ label, total, open, onToggle, accent }: {
 function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAlt, overrideAmounts }: {
   account: CashflowAccount; monthIndex: number; months: string[]; currentMonthIndex: number; isAlt: boolean; overrideAmounts: Map<string, number>;
 }) {
+  const readOnly = account.accountCode === 'VAT_LIABILITY';
   return (
     <div className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${isAlt ? 'bg-row-alt' : ''}`}>
-      <span className="text-xs pl-3 truncate pr-3 flex-1">{account.accountName}</span>
+      <span className="text-xs pl-3 truncate pr-3 flex-1">
+        {account.accountName}
+        {readOnly && <span className="ml-1 text-muted-foreground" title="Calculated automatically">🔒</span>}
+      </span>
       <div className="shrink-0 min-w-[80px] text-right">
-        <EditableCell
-          value={account.monthly[monthIndex]}
-          accountCode={account.accountCode}
-          month={months[monthIndex]}
-          isProjected={account.isProjected[monthIndex]}
-          hasOverride={account.hasOverride?.[monthIndex] ?? false}
-          isCurrentMonth={monthIndex === currentMonthIndex}
-          isAltRow={isAlt}
-          previousValue={monthIndex > 0 ? account.monthly[monthIndex - 1] : undefined}
-          months={months}
-          monthIndex={monthIndex}
-          overrideAmount={overrideAmounts.get(`${account.accountCode}|${months[monthIndex]}`)}
-          as="div"
-        />
+        {readOnly ? (
+          <span className="text-sm tabular-nums text-muted-foreground">
+            {account.monthly[monthIndex] ? formatGBP(account.monthly[monthIndex]) : ''}
+          </span>
+        ) : (
+          <EditableCell
+            value={account.monthly[monthIndex]}
+            accountCode={account.accountCode}
+            month={months[monthIndex]}
+            isProjected={account.isProjected[monthIndex]}
+            hasOverride={account.hasOverride?.[monthIndex] ?? false}
+            isCurrentMonth={monthIndex === currentMonthIndex}
+            isAltRow={isAlt}
+            previousValue={monthIndex > 0 ? account.monthly[monthIndex - 1] : undefined}
+            months={months}
+            monthIndex={monthIndex}
+            overrideAmount={overrideAmounts.get(`${account.accountCode}|${months[monthIndex]}`)}
+            as="div"
+          />
+        )}
       </div>
     </div>
   );
