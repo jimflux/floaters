@@ -1,7 +1,11 @@
 import { useState, useCallback } from 'react';
 
 const COL_WIDTH = 100;
-const CHART_HEIGHT = 180;
+// Taller than it is wide-per-column on purpose: the chart stretches to fill the
+// column-aligned width (preserveAspectRatio="none"), so a short height reads as
+// a flat, squished band on wide screens. Render height stays equal to the
+// viewBox height, keeping the y-axis and stroke weights undistorted.
+const CHART_HEIGHT = 280;
 const PADDING_TOP = 20;
 const PADDING_BOTTOM = 30;
 const AXIS_LABEL_X = 4;
