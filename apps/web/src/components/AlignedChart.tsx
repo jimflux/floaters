@@ -146,23 +146,9 @@ export default function AlignedChart({
           ) : null
         ))}
 
-        {/* Y-axis labels */}
+        {/* Grid lines (labels are HTML overlays below so they don't distort) */}
         {yTicks.map((t, i) => (
-          <text
-            key={`label-${i}`}
-            x={AXIS_LABEL_X}
-            y={t.y + 3}
-            textAnchor="start"
-            fill="hsl(var(--muted-foreground))"
-            fontSize={10}
-          >
-            {formatGBP(t.value)}
-          </text>
-        ))}
-
-        {/* Grid lines */}
-        {yTicks.map((t, i) => (
-          <line key={i} x1={0} x2={svgWidth} y1={t.y} y2={t.y} stroke="hsl(var(--border))" strokeWidth={1} />
+          <line key={i} x1={0} x2={svgWidth} y1={t.y} y2={t.y} stroke="hsl(var(--border))" strokeWidth={1} vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Area fill */}
@@ -173,39 +159,64 @@ export default function AlignedChart({
           <path data-testid="optimistic-band" d={bandPath} fill={OPTIMISTIC_BAND_FILL} />
         )}
 
-        {/* Historical line */}
+        {/* Historical line. non-scaling-stroke keeps a true 2px weight despite
+            the non-uniform viewBox scaling. */}
         {histPoints.length > 1 && (
-          <path d={histLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} />
+          <path d={histLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Future line (dashed) */}
         {futPoints.length > 1 && (
-          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} strokeDasharray="6 3" />
+          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} strokeDasharray="6 3" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Optimistic line (lighter, dashed) */}
         {hasDivergence && optFutPoints.length > 1 && (
-          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={OPTIMISTIC_STROKE} strokeWidth={1.5} strokeDasharray="3 4" />
+          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={OPTIMISTIC_STROKE} strokeWidth={1.5} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
         )}
 
-        {/* Current month dot */}
-        <circle
-          cx={points[currentMonthIndex].x}
-          cy={points[currentMonthIndex].y}
-          r={5}
-          fill="hsl(var(--foreground))"
-          stroke="hsl(var(--background))"
-          strokeWidth={2}
-        />
-
-        {/* Tooltip crosshair */}
+        {/* Tooltip crosshair (the dot is an HTML overlay below) */}
         {tooltip && (
-          <>
-            <line x1={tooltip.x} x2={tooltip.x} y1={PADDING_TOP} y2={PADDING_TOP + plotHeight} stroke="hsl(var(--muted-foreground))" strokeWidth={1} strokeDasharray="3 3" />
-            <circle cx={tooltip.x} cy={tooltip.y} r={4} fill="hsl(var(--primary))" stroke="hsl(var(--background))" strokeWidth={2} />
-          </>
+          <line x1={tooltip.x} x2={tooltip.x} y1={PADDING_TOP} y2={PADDING_TOP + plotHeight} stroke="hsl(var(--muted-foreground))" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
         )}
       </svg>
+
+      {/* HTML overlays for shapes that must NOT inherit the SVG's non-uniform
+          x/y scaling: y-axis labels, the current-month dot, the tooltip dot.
+          Positioned by percentage so they track the (uniformly-scaled) axes. */}
+      {yTicks.map((t, i) => (
+        <div
+          key={`ylabel-${i}`}
+          className="absolute text-[10px] text-muted-foreground pointer-events-none tabular-nums"
+          style={{ top: `${(t.y / CHART_HEIGHT) * 100}%`, left: AXIS_LABEL_X, transform: 'translateY(-50%)' }}
+        >
+          {formatGBP(t.value)}
+        </div>
+      ))}
+
+      <div
+        className="absolute rounded-full bg-foreground pointer-events-none"
+        style={{
+          width: 10, height: 10,
+          left: `${(points[currentMonthIndex].x / svgWidth) * 100}%`,
+          top: `${(points[currentMonthIndex].y / CHART_HEIGHT) * 100}%`,
+          transform: 'translate(-50%, -50%)',
+          boxShadow: '0 0 0 2px hsl(var(--background))',
+        }}
+      />
+
+      {tooltip && (
+        <div
+          className="absolute rounded-full bg-primary pointer-events-none"
+          style={{
+            width: 8, height: 8,
+            left: `${(tooltip.x / svgWidth) * 100}%`,
+            top: `${(tooltip.y / CHART_HEIGHT) * 100}%`,
+            transform: 'translate(-50%, -50%)',
+            boxShadow: '0 0 0 2px hsl(var(--background))',
+          }}
+        />
+      )}
 
       {/* Legend: only when the lines actually separate */}
       {hasDivergence && (
