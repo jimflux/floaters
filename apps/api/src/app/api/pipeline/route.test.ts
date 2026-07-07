@@ -161,6 +161,28 @@ describe("GET /api/pipeline", () => {
     expect(res.projections[0].consumed).toBe(15000);
   });
 
+  it("expands a recurring projection into occurrences and attributes consumption by invoice month", async () => {
+    // £10k/mo × 3 from Aug; one £10k invoice due in September assigned.
+    state.projections = [
+      {
+        id: "p1", connection_id: "conn", client_label: "IKEA", contact_id: "c1",
+        amount: 10000, expected_month: "2026-08", recurrence_count: 3,
+        created_at: "", updated_at: "",
+      },
+    ];
+    state.invoices = [
+      invoice({ xero_id: "sep", projection_id: "p1", status: "AUTHORISED", total: 10000, due_date: "2026-09-20", reviewed_at: "x" }),
+    ];
+    const res = await run();
+    const p = res.projections[0];
+    expect(p.recurrenceCount).toBe(3);
+    expect(p.occurrences.map((o: { month: string }) => o.month)).toEqual(["2026-08", "2026-09", "2026-10"]);
+    const sep = p.occurrences.find((o: { month: string }) => o.month === "2026-09");
+    expect(sep.remainder).toBe(0); // consumed by the September invoice
+    expect(p.remainder).toBe(20000); // Aug + Oct still open
+    expect(p.consumed).toBe(10000);
+  });
+
   it("lapsed: month before current with remainder > 0; not when equal or consumed (R18)", async () => {
     const base = { connection_id: "conn", client_label: "X", contact_id: null, created_at: "", updated_at: "" };
     state.projections = [

@@ -2,9 +2,8 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, handleError } from "@/lib/api-helpers";
 import {
   projectionToApi,
-  projectionRemainder,
-  projectionConsumed,
-  isLapsed,
+  expandProjection,
+  invoiceBucketMonth,
   clientKey,
   type ProjectionRow,
 } from "@/lib/pipeline";
@@ -45,7 +44,7 @@ export async function GET() {
           .order("expected_month", { ascending: true }),
         supabase
           .from("xero_invoices")
-          .select("xero_id, projection_id, status, total")
+          .select("xero_id, projection_id, status, total, due_date, expected_payment_date")
           .eq("connection_id", connectionId)
           .not("projection_id", "is", null),
         // R17 tray filter: unreviewed ACCREC in AUTHORISED/SUBMITTED, or PAID
@@ -85,14 +84,22 @@ export async function GET() {
 
     const projections = (((projectionRows as ProjectionRow[]) || [])).map((row) => {
       const assigned = assignedByProjection.get(row.id) || [];
-      const totals = assigned.map((a) => ({ status: a.status, total: a.total }));
-      const remainder = projectionRemainder(Number(row.amount), totals);
+      const exp = expandProjection(
+        row,
+        assigned.map((a) => ({
+          status: a.status,
+          total: a.total,
+          bucketMonth: invoiceBucketMonth(a.expected_payment_date, a.due_date, currentMonth),
+        })),
+        currentMonth
+      );
       return {
         ...projectionToApi(row),
         clientKey: clientKey(row.contact_id, row.client_label),
-        remainder,
-        consumed: projectionConsumed(totals),
-        lapsed: isLapsed(row.expected_month, currentMonth, remainder),
+        remainder: exp.remainderTotal,
+        consumed: exp.consumedTotal,
+        lapsed: exp.lapsed,
+        occurrences: exp.occurrences,
         invoiceIds: assigned.map((a) => a.xero_id),
       };
     });

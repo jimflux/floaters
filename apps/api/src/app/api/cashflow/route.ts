@@ -4,7 +4,12 @@ import { NextRequest } from "next/server";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { z } from "zod/v4";
 import { HISTORY_MONTHS } from "@/lib/xero/sync";
-import { projectionRemainder, isLapsed, clientKey } from "@/lib/pipeline";
+import {
+  expandProjection,
+  invoiceBucketMonth,
+  clientKey,
+  type ProjectionRow,
+} from "@/lib/pipeline";
 import type {
   CashflowResponse,
   CashflowAccount,
@@ -121,10 +126,11 @@ export async function GET(request: NextRequest) {
         .select("*")
         .eq("connection_id", connectionId),
       // Every invoice linked to a projection, any status: remainders net
-      // against totals (R14), and VOIDED/DELETED are excluded in the helper
+      // against totals (R14, VOIDED/DELETED excluded in the helper); dates let
+      // recurring projections attribute consumption to the matching occurrence.
       supabase
         .from("xero_invoices")
-        .select("xero_id, projection_id, status, total")
+        .select("xero_id, projection_id, status, total, due_date, expected_payment_date")
         .eq("connection_id", connectionId)
         .not("projection_id", "is", null),
     ]);
@@ -435,40 +441,47 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Projections: non-lapsed remainders at their expected month, never
-    // floored (R18 — non-lapsed implies current or later). Lapsed projections
-    // leave the optimistic layer entirely and surface via /api/pipeline.
+    // Projections: expand each into its monthly occurrences (recurrence +
+    // escalation), then add every non-lapsed occurrence's remainder to the
+    // projected layer at its own month, never floored (R18 — non-lapsed
+    // implies current or later). Lapsed occurrences leave the optimistic layer
+    // entirely and surface via /api/pipeline.
     const assignedByProjection = new Map<
       string,
-      Array<{ status: string | null; total: number | string | null }>
+      Array<{ status: string | null; total: number | string | null; bucketMonth: string | null }>
     >();
     for (const inv of assignedInvoices) {
       const pid = inv.projection_id as string;
       const list = assignedByProjection.get(pid) || [];
-      list.push({ status: inv.status as string | null, total: inv.total as number | null });
+      list.push({
+        status: inv.status as string | null,
+        total: inv.total as number | null,
+        bucketMonth: invoiceBucketMonth(
+          inv.expected_payment_date as string | null,
+          inv.due_date as string | null,
+          currentMonth
+        ),
+      });
       assignedByProjection.set(pid, list);
     }
 
-    for (const proj of projections) {
-      const remainder = projectionRemainder(
-        Number(proj.amount),
-        assignedByProjection.get(proj.id as string) || []
+    for (const proj of projections as ProjectionRow[]) {
+      const { occurrences } = expandProjection(
+        proj,
+        assignedByProjection.get(proj.id) || [],
+        currentMonth
       );
-      if (remainder <= 0) continue;
-      const expectedMonth = proj.expected_month as string;
-      if (isLapsed(expectedMonth, currentMonth, remainder)) continue;
-      if (!months.includes(expectedMonth)) continue;
-
-      const key = clientKey(
-        proj.contact_id as string | null,
-        proj.client_label as string | null
-      );
-      nameClient(
-        key,
-        ((proj.client_label as string) || "").trim().replace(/\s+/g, " ") || null,
-        1
-      );
-      addIncome("projected", key, expectedMonth, remainder);
+      const key = clientKey(proj.contact_id, proj.client_label);
+      let named = false;
+      for (const occ of occurrences) {
+        if (occ.lapsed || occ.remainder <= 0) continue;
+        if (!months.includes(occ.month)) continue;
+        if (!named) {
+          nameClient(key, (proj.client_label || "").trim().replace(/\s+/g, " ") || null, 1);
+          named = true;
+        }
+        addIncome("projected", key, occ.month, occ.remainder);
+      }
     }
 
     // The last 3 calendar months before the current one, independent of the

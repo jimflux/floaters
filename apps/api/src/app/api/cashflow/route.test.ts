@@ -389,6 +389,40 @@ describe("income: projected layer and lapse", () => {
     assertInvariants(res);
   });
 
+  it("spreads a recurring projection across its occurrence months", async () => {
+    // start June (current), 3 monthly occurrences → Jun/Jul/Aug; window is
+    // May/Jun/Jul so Aug falls outside and is dropped.
+    state.projections = [
+      { ...baseProjection, amount: 5000, expected_month: "2026-06", recurrence_count: 3 },
+    ];
+    const res = await run();
+    const ikea = client(res, "contact:c-ikea")!;
+    expect(ikea.projected[0]).toBe(0); // May: before the series
+    expect(ikea.projected[1]).toBe(5000); // Jun
+    expect(ikea.projected[2]).toBe(5000); // Jul
+    expect(res.income.totals.projected).toEqual([0, 5000, 5000]);
+    assertInvariants(res);
+  });
+
+  it("applies compounding escalation to a recurring projection's later months", async () => {
+    // +10% every 1 occurrence → Jun 5000, Jul 5500 (Aug 6050 out of window).
+    state.projections = [
+      {
+        ...baseProjection,
+        amount: 5000,
+        expected_month: "2026-06",
+        recurrence_count: 3,
+        escalation_pct: 10,
+        escalation_every: 1,
+      },
+    ];
+    const res = await run();
+    const ikea = client(res, "contact:c-ikea")!;
+    expect(ikea.projected[1]).toBe(5000); // Jun (block 0)
+    expect(ikea.projected[2]).toBe(5500); // Jul (block 1: ×1.1)
+    assertInvariants(res);
+  });
+
   it("excludes VOIDED invoices from remainder consumption (R14)", async () => {
     state.projections = [{ ...baseProjection }];
     state.invoices = [

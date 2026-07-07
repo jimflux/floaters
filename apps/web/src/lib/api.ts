@@ -116,6 +116,9 @@ export interface ProjectionInput {
   amount: number; // inc VAT
   expectedMonth: string; // yyyy-MM
   contactId?: string | null;
+  recurrenceCount?: number; // monthly occurrences from expectedMonth (1 = one-off)
+  escalationPct?: number; // % uplift per block
+  escalationEvery?: number | null; // occurrences per escalation block
 }
 
 export function createProjection(input: ProjectionInput): Promise<void> {

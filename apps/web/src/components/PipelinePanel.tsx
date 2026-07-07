@@ -28,6 +28,18 @@ function formatMonth(yyyymm: string): string {
   return `${months[parseInt(m, 10) - 1]} ${y.slice(2)}`;
 }
 
+function addMonthsKey(yyyymm: string, n: number): string {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const zero = y * 12 + (m - 1) + n;
+  return `${Math.floor(zero / 12)}-${String((zero % 12) + 1).padStart(2, '0')}`;
+}
+
+function monthsBetween(start: string, end: string): number {
+  const [sy, sm] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  return (ey * 12 + em) - (sy * 12 + sm) + 1;
+}
+
 // What needs Jim's attention: unreviewed invoices plus lapsed projections.
 // Drives the header entry badge.
 export function attentionCount(pipeline: PipelineResponse | undefined): number {
@@ -302,14 +314,25 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
   const [amount, setAmount] = useState('');
   const [month, setMonth] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [recurring, setRecurring] = useState(false);
+  const [count, setCount] = useState(3);
+  const [escOn, setEscOn] = useState(false);
+  const [escPct, setEscPct] = useState('');
+  const [escEvery, setEscEvery] = useState('12');
+
+  // End month is derived from start + count; editing it back-computes count.
+  const validStart = /^\d{4}-\d{2}$/.test(month);
+  const endMonth = validStart ? addMonthsKey(month, Math.max(1, count) - 1) : '';
+
+  const reset = () => {
+    setLabel(''); setContactId(null); setAmount(''); setMonth('');
+    setRecurring(false); setCount(3); setEscOn(false); setEscPct(''); setEscEvery('12');
+  };
 
   const createMutation = useMutation({
     mutationFn: createProjection,
     onError: (_e, _v, ctx) => { rollback(ctx as { previous?: PipelineResponse } | undefined); toast.error('Failed to add projection'); },
-    onSuccess: () => {
-      toast.success('Projection added');
-      setLabel(''); setContactId(null); setAmount(''); setMonth('');
-    },
+    onSuccess: () => { toast.success('Projection added'); reset(); },
     onSettled: settle,
   });
 
@@ -317,8 +340,22 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
     const num = parseFloat(amount);
     if (!label.trim()) { toast.error('Give the projection a client'); return; }
     if (isNaN(num) || num <= 0) { toast.error('Amount must be above zero'); return; }
-    if (!/^\d{4}-\d{2}$/.test(month)) { toast.error('Pick an expected month'); return; }
-    createMutation.mutate({ clientLabel: label.trim(), amount: num, expectedMonth: month, contactId });
+    if (!validStart) { toast.error('Pick an expected month'); return; }
+    const pct = parseFloat(escPct);
+    const every = parseInt(escEvery, 10);
+    if (recurring && escOn && (isNaN(pct) || pct <= 0 || isNaN(every) || every < 1)) {
+      toast.error('Set a % increase and how often it applies');
+      return;
+    }
+    createMutation.mutate({
+      clientLabel: label.trim(),
+      amount: num,
+      expectedMonth: month,
+      contactId,
+      recurrenceCount: recurring ? Math.max(1, count) : 1,
+      escalationPct: recurring && escOn ? pct : undefined,
+      escalationEvery: recurring && escOn ? every : undefined,
+    });
   };
 
   return (
@@ -369,12 +406,58 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
           <Input id="proj-amount" type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)} className="h-8 text-sm" />
         </div>
         <div className="flex-1">
-          <label className="text-[10px] text-muted-foreground" htmlFor="proj-month">Expected month</label>
+          <label className="text-[10px] text-muted-foreground" htmlFor="proj-month">{recurring ? 'Start month' : 'Expected month'}</label>
           <Input id="proj-month" type="month" value={month} onChange={e => setMonth(e.target.value)} className="h-8 text-sm" />
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-xs cursor-pointer pt-0.5">
+        <Checkbox checked={recurring} onCheckedChange={(v) => setRecurring(Boolean(v))} aria-label="Repeats monthly" />
+        Repeats monthly
+      </label>
+
+      {recurring && (
+        <div className="space-y-2 pl-1 border-l-2 border-border">
+          <div className="flex gap-2 pl-2">
+            <div className="flex-1">
+              <label className="text-[10px] text-muted-foreground" htmlFor="proj-count">For (months)</label>
+              <Input
+                id="proj-count" type="number" min={1} value={count}
+                onChange={e => setCount(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="text-[10px] text-muted-foreground" htmlFor="proj-end">or until</label>
+              <Input
+                id="proj-end" type="month" value={endMonth}
+                onChange={e => {
+                  if (/^\d{4}-\d{2}$/.test(e.target.value) && validStart) {
+                    setCount(Math.max(1, monthsBetween(month, e.target.value)));
+                  }
+                }}
+                className="h-8 text-sm"
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs cursor-pointer pl-2">
+            <Checkbox checked={escOn} onCheckedChange={(v) => setEscOn(Boolean(v))} aria-label="Step up over time" />
+            Step up over time
+          </label>
+          {escOn && (
+            <div className="flex items-center gap-2 pl-2 text-xs text-muted-foreground">
+              +
+              <Input type="number" min={0} step="0.1" value={escPct} onChange={e => setEscPct(e.target.value)} placeholder="5" className="h-8 w-16 text-sm" aria-label="Percent increase" />
+              % every
+              <Input type="number" min={1} value={escEvery} onChange={e => setEscEvery(e.target.value)} className="h-8 w-16 text-sm" aria-label="Occurrences per step" />
+              months
+            </div>
+          )}
+        </div>
+      )}
+
       <Button size="sm" className="h-7 text-xs w-full" onClick={handleAdd} disabled={createMutation.isPending}>
-        Add projection
+        {recurring ? `Add projection (${Math.max(1, count)} months)` : 'Add projection'}
       </Button>
     </div>
   );
@@ -434,7 +517,12 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            {formatGBP(projection.amount)} · {formatMonth(projection.expectedMonth)}
+            {projection.recurrenceCount > 1
+              ? `${formatGBP(projection.amount)}/mo · ${formatMonth(projection.expectedMonth)}–${formatMonth(addMonthsKey(projection.expectedMonth, projection.recurrenceCount - 1))}`
+              : `${formatGBP(projection.amount)} · ${formatMonth(projection.expectedMonth)}`}
+            {projection.escalationEvery && projection.escalationPct > 0
+              ? ` · +${projection.escalationPct}%/${projection.escalationEvery}mo`
+              : ''}
             {projection.invoiceIds.length > 0
               ? ` · ${formatGBP(projection.remainder)} left (${projection.invoiceIds.length} invoice${projection.invoiceIds.length > 1 ? 's' : ''})`
               : ''}
