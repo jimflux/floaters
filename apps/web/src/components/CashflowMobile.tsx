@@ -9,6 +9,11 @@ import AccountManagementPanel from '@/components/AccountManagementPanel';
 import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart from '@/components/AlignedChart';
+import ForecastViewToggle from '@/components/ForecastViewToggle';
+import { useForecastView } from '@/hooks/use-forecast-view';
+
+const SECONDARY_STROKE_COMMITTED = 'hsl(38 92% 50%)';
+const SECONDARY_STROKE_PROJECTED = 'hsl(var(--muted-foreground))';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -48,7 +53,19 @@ interface Props {
 
 export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [] } = data;
+
+  const [view, setView] = useForecastView();
+  const projected = view === 'projected';
+  const optimisticNetSeries = optimisticNet ?? committedNet;
+  const primaryClosing = projected ? optimisticClosing : committedClosing;
+  const primaryNet = projected ? optimisticNetSeries : committedNet;
+  const primaryOpening = projected
+    ? committedOpening.map((_, i) => (i === 0 ? committedOpening[0] : optimisticClosing[i - 1]))
+    : committedOpening;
+  const primaryFallsBelow = projected ? optimisticFallsBelowZeroIn : fallsBelowZeroIn;
+  const secondaryFallsBelow = projected ? fallsBelowZeroIn : optimisticFallsBelowZeroIn;
+  const secondaryFallsLabel = projected ? 'Cash only (committed)' : 'If projections land';
 
   const [activeIdx, setActiveIdx] = useState(currentMonthIndex);
   const [incomeOpen, setIncomeOpen] = useState(true);
@@ -126,14 +143,19 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
 
       {/* Stat block */}
       <div className="px-4 pt-4 pb-3 border-b border-border">
-        <p className="text-xs text-muted-foreground mb-0.5">Today's balance</p>
-        <p className="text-3xl font-bold tracking-tight tabular-nums">{formatGBP(currentBalance)}</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">Today's balance</p>
+            <p className="text-3xl font-bold tracking-tight tabular-nums">{formatGBP(currentBalance)}</p>
+          </div>
+          <ForecastViewToggle view={view} onChange={setView} />
+        </div>
         <div className="mt-2 flex items-baseline gap-2">
           <span className="text-xs text-muted-foreground">Drops below £0:</span>
-          <span className={`text-sm font-semibold ${getZeroColor(fallsBelowZeroIn)}`}>{fallsBelowZeroIn || 'Never'}</span>
+          <span className={`text-sm font-semibold ${getZeroColor(primaryFallsBelow)}`}>{primaryFallsBelow || 'Never'}</span>
         </div>
-        {optimisticFallsBelowZeroIn !== fallsBelowZeroIn && (
-          <p className="text-xs text-muted-foreground mt-0.5">If projections land: {optimisticFallsBelowZeroIn || 'Never'}</p>
+        {secondaryFallsBelow !== primaryFallsBelow && (
+          <p className="text-xs text-muted-foreground mt-0.5">{secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}</p>
         )}
       </div>
 
@@ -141,10 +163,13 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
       <div className="px-2 py-3 border-b border-border">
         <AlignedChart
           months={months}
-          closingBalance={committedClosing}
-          optimisticClosing={optimisticClosing}
+          closingBalance={primaryClosing}
+          optimisticClosing={projected ? committedClosing : optimisticClosing}
           currentMonthIndex={currentMonthIndex}
           formatMonth={formatMonthShort}
+          primaryLabel={projected ? 'Projected' : 'Committed'}
+          secondaryLabel={secondaryFallsLabel}
+          secondaryStroke={projected ? SECONDARY_STROKE_PROJECTED : SECONDARY_STROKE_COMMITTED}
         />
       </div>
 
@@ -191,7 +216,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
       {/* Month detail list */}
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="pb-8">
         {/* Opening balance */}
-        <SummaryRowMobile label="Opening balance" value={committedOpening[activeIdx]} />
+        <SummaryRowMobile label="Opening balance" value={primaryOpening[activeIdx]} />
 
         {/* Income: three layers, client rows collapsed beneath */}
         <SectionHeaderMobile
@@ -232,8 +257,8 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
         ))}
 
         {/* Net + Ending */}
-        <SummaryRowMobile label="Net cash movement" value={committedNet[activeIdx]} bold colored />
-        <SummaryRowMobile label="Ending balance" value={committedClosing[activeIdx]} />
+        <SummaryRowMobile label={projected ? 'Net cash movement (projected)' : 'Net cash movement'} value={primaryNet[activeIdx]} bold colored />
+        <SummaryRowMobile label="Ending balance" value={primaryClosing[activeIdx]} />
       </div>
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
