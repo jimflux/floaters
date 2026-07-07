@@ -6,7 +6,21 @@ import {
   paymentMonthForMonth,
   seedVatableFromTax,
   resolveVatable,
+  invoiceOutputVat,
+  projectionVatByMonth,
+  computeVat,
 } from "./vat";
+import type { ProjectionRow, AssignedInvoice } from "./pipeline";
+
+function projection(amount: number, expectedMonth: string, recurrence = 1): ProjectionRow {
+  return {
+    amount,
+    expected_month: expectedMonth,
+    recurrence_count: recurrence,
+    escalation_pct: 0,
+    escalation_every: null,
+  } as unknown as ProjectionRow;
+}
 
 describe("VAT_FACTOR", () => {
   it("is 1/6 at the 20% rate, derived not hardcoded", () => {
@@ -71,5 +85,109 @@ describe("resolveVatable", () => {
   });
   it("defaults VATable when unknown (no override, no seed)", () => {
     expect(resolveVatable(undefined, null)).toBe(true);
+  });
+});
+
+describe("invoiceOutputVat", () => {
+  it("uses the real Xero tax when known (AE1), preserving a genuine zero", () => {
+    expect(invoiceOutputVat(200, 1200, true)).toBe(200);
+    expect(invoiceOutputVat(0, 1200, true)).toBe(0); // IKEA, zero-rated
+    expect(invoiceOutputVat(200, 1200, false)).toBe(200); // real tax is authoritative
+  });
+  it("falls back to a VATable-aware estimate when tax is NULL (AE7)", () => {
+    expect(invoiceOutputVat(null, 1200, true)).toBeCloseTo(200, 6); // 1200 * 1/6
+    expect(invoiceOutputVat(null, 1200, false)).toBe(0); // never invents VAT
+  });
+});
+
+describe("projectionVatByMonth", () => {
+  it("accrues 1/6 of a single VATable projection remainder (AE2)", () => {
+    const m = projectionVatByMonth(projection(6000, "2026-07"), [], "2026-06");
+    expect(m.get("2026-07")).toBeCloseTo(1000, 6);
+  });
+  it("accrues only on the residual after in-series consumption", () => {
+    const assigned: AssignedInvoice[] = [{ status: "AUTHORISED", total: 3000 }];
+    const m = projectionVatByMonth(projection(6000, "2026-07"), assigned, "2026-06");
+    expect(m.get("2026-07")).toBeCloseTo(500, 6); // (6000-3000) * 1/6
+  });
+  it("caps at the projection-level residual when an invoice buckets outside the series", () => {
+    // 3 occurrences x 6000 = 18000; a 6000 invoice bucketed to 2026-09 (outside
+    // Jun/Jul/Aug) raises consumedTotal but decrements no occurrence remainder.
+    // Projected VAT must be (18000-6000)*1/6 = 2000, not 3 x 1000 = 3000.
+    const assigned: AssignedInvoice[] = [{ status: "AUTHORISED", total: 6000, bucketMonth: "2026-09" }];
+    const m = projectionVatByMonth(projection(6000, "2026-06", 3), assigned, "2026-06");
+    const total = [...m.values()].reduce((s, v) => s + v, 0);
+    expect(total).toBeCloseTo(2000, 1); // ~2000; per-occurrence rounding drifts a penny
+    expect(total).toBeLessThan(3000); // the point: capped, not 3 x 1000
+  });
+  it("skips lapsed occurrences so VAT is never accrued into a closed quarter", () => {
+    const m = projectionVatByMonth(projection(6000, "2026-01", 3), [], "2026-06"); // Jan-Mar all past
+    expect(m.size).toBe(0);
+  });
+});
+
+describe("computeVat", () => {
+  const months = ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"];
+
+  it("places a committed bill at the payment month and shows it in the VAT row (AE3)", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 0, // current = 2026-06
+      committedVatByIssueMonth: new Map([["2026-07", 30000]]), // Jun-Aug quarter, pays 2026-10
+      projectedVatByExpectedMonth: new Map(),
+      paidQuarters: new Set(),
+    });
+    expect(r.committedBillByMonth.get("2026-10")).toBe(30000);
+    expect(r.vatRow[months.indexOf("2026-10")]).toBe(30000);
+  });
+
+  it("owes the open quarter's VAT now and drops to zero at the payment month (AE5 continuity)", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 0,
+      committedVatByIssueMonth: new Map([["2026-06", 18000]]),
+      projectedVatByExpectedMonth: new Map(),
+      paidQuarters: new Set(),
+    });
+    expect(r.vatOwedNow).toBe(18000);
+    expect(r.committedLiability[months.indexOf("2026-09")]).toBe(18000);
+    expect(r.committedLiability[months.indexOf("2026-10")]).toBe(0); // paid → nets out
+  });
+
+  it("keeps projected VAT off the committed walk (AE9)", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 0,
+      committedVatByIssueMonth: new Map(),
+      projectedVatByExpectedMonth: new Map([["2026-07", 1000]]),
+      paidQuarters: new Set(),
+    });
+    expect(r.committedBillByMonth.size).toBe(0);
+    expect(r.vatOwedNow).toBe(0);
+    expect(r.optimisticExtraByMonth.get("2026-10")).toBe(1000);
+  });
+
+  it("treats a past-due quarter as already paid (no outflow, nets out of liability)", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 3, // current = 2026-09
+      committedVatByIssueMonth: new Map([["2026-04", 5000]]), // Mar-May quarter, paid 2026-07 (past)
+      projectedVatByExpectedMonth: new Map(),
+      paidQuarters: new Set(),
+    });
+    expect(r.committedBillByMonth.size).toBe(0);
+    expect(r.vatOwedNow).toBe(0);
+  });
+
+  it("suppresses a quarter's bill once it is marked paid", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 0,
+      committedVatByIssueMonth: new Map([["2026-06", 18000]]),
+      projectedVatByExpectedMonth: new Map(),
+      paidQuarters: new Set(["2026-08"]), // open quarter marked paid
+    });
+    expect(r.committedBillByMonth.size).toBe(0);
+    expect(r.vatOwedNow).toBe(0);
   });
 });
