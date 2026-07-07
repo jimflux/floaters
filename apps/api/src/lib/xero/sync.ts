@@ -435,6 +435,25 @@ export async function healInvoiceStatuses(connectionId: string): Promise<number>
   return fetchInvoicesByIds(connectionId, ids);
 }
 
+/**
+ * One-off backfill of total_tax onto ACCREC invoices synced before the VAT
+ * column existed. The status heal only re-fetches locally-open invoices, so
+ * already-PAID invoices would never pick up their tax otherwise. Re-fetch by
+ * ID (bypasses the status filter) every ACCREC invoice whose tax is still NULL.
+ * The dataset is small; idempotent (re-runs fetch nothing once tax is set).
+ */
+export async function backfillInvoiceTax(connectionId: string): Promise<number> {
+  const { data } = await supabase
+    .from("xero_invoices")
+    .select("xero_id")
+    .eq("connection_id", connectionId)
+    .eq("type", "ACCREC")
+    .is("total_tax", null);
+  const ids = (data || []).map((r) => r.xero_id as string);
+  if (ids.length === 0) return 0;
+  return fetchInvoicesByIds(connectionId, ids);
+}
+
 async function syncBankTransactions(
   connectionId: string,
   since: string

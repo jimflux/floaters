@@ -1,5 +1,5 @@
 import { requireConnection, json, handleError } from "@/lib/api-helpers";
-import { runSync, healInvoiceStatuses } from "@/lib/xero/sync";
+import { runSync, healInvoiceStatuses, backfillInvoiceTax } from "@/lib/xero/sync";
 import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 const flagsSchema = z.object({
   full: z.boolean().optional(),
   heal: z.boolean().optional(),
+  backfillTax: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -85,8 +86,16 @@ export async function POST(request: NextRequest) {
       healed = await healInvoiceStatuses(connectionId);
     }
 
+    // { backfillTax: true } is the one-off VAT prep: pull TotalTax onto ACCREC
+    // invoices synced before the column existed (incl. already-PAID ones the
+    // heal skips). Run once after the VAT migration deploys.
+    let taxBackfilled = 0;
+    if (flags.backfillTax === true) {
+      taxBackfilled = await backfillInvoiceTax(connectionId);
+    }
+
     const records = await runSync(connectionId, isInitial);
-    return json({ ok: true, recordsSynced: records, healed });
+    return json({ ok: true, recordsSynced: records, healed, taxBackfilled });
   } catch (err) {
     return handleError(err);
   }

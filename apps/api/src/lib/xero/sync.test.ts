@@ -28,6 +28,7 @@ vi.mock("@/lib/supabase", () => {
       select: (_cols?: string, opts?: { head?: boolean }) => ((head = Boolean(opts?.head)), builder),
       eq: (c: string, v: unknown) => ((filters[c] = v), builder),
       in: (c: string, v: unknown) => ((filters[`in_${c}`] = v), builder),
+      is: (c: string, v: unknown) => ((filters[`is_${c}`] = v), builder),
       then: (onF: (r: unknown) => unknown, onR?: (e: unknown) => unknown) => {
         if (head) {
           const count = table === "xero_payments" ? state.paymentCount : 0;
@@ -40,6 +41,9 @@ vi.mock("@/lib/supabase", () => {
           if (inStatus) rows = rows.filter((r) => inStatus.includes(r.status as string));
           const inIds = filters.in_xero_id as string[] | undefined;
           if (inIds) rows = rows.filter((r) => inIds.includes(r.xero_id as string));
+          const typeEq = filters.type as string | undefined;
+          if (typeEq) rows = rows.filter((r) => r.type === typeEq);
+          if ("is_total_tax" in filters) rows = rows.filter((r) => (r.total_tax ?? null) === filters.is_total_tax);
         }
         return Promise.resolve({ data: rows, error: null }).then(onF, onR);
       },
@@ -58,6 +62,7 @@ import {
   invoiceWhere,
   fetchInvoicesByIds,
   healInvoiceStatuses,
+  backfillInvoiceTax,
   syncPayments,
 } from "./sync";
 import type { XeroInvoice, XeroPayment } from "@/types/xero";
@@ -300,6 +305,40 @@ describe("healInvoiceStatuses", () => {
   it("returns 0 without any Xero call when nothing is open", async () => {
     state.invoiceRows = [{ xero_id: "inv-done", status: "PAID" }];
     const count = await healInvoiceStatuses("conn");
+    expect(count).toBe(0);
+    expect(xeroRequestMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("backfillInvoiceTax", () => {
+  beforeEach(() => {
+    upsertMock.mockReset();
+    upsertMock.mockResolvedValue({ error: null });
+    xeroRequestMock.mockReset();
+    state.invoiceRows = [];
+  });
+
+  it("re-fetches only ACCREC invoices whose tax is still NULL", async () => {
+    state.invoiceRows = [
+      { xero_id: "a", type: "ACCREC", total_tax: null },
+      { xero_id: "b", type: "ACCREC", total_tax: 200 }, // already has tax
+      { xero_id: "c", type: "ACCPAY", total_tax: null }, // a bill, not income
+    ];
+    xeroRequestMock.mockImplementation(async (opts: { params: { IDs: string } }) => ({
+      Invoices: opts.params.IDs.split(",").map((id) => xeroInvoice(id)),
+    }));
+
+    const count = await backfillInvoiceTax("conn");
+
+    expect(count).toBe(1);
+    expect(xeroRequestMock).toHaveBeenCalledTimes(1);
+    const call = xeroRequestMock.mock.calls[0][0] as { params: { IDs: string } };
+    expect(call.params.IDs).toBe("a");
+  });
+
+  it("no-ops without any Xero call when every ACCREC invoice already has tax", async () => {
+    state.invoiceRows = [{ xero_id: "b", type: "ACCREC", total_tax: 200 }];
+    const count = await backfillInvoiceTax("conn");
     expect(count).toBe(0);
     expect(xeroRequestMock).not.toHaveBeenCalled();
   });
