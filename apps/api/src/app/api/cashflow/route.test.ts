@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   hidden: [] as Record<string, unknown>[],
   overrides: [] as Record<string, unknown>[],
   projections: [] as Record<string, unknown>[],
+  vatState: null as Record<string, unknown> | null,
+  vatable: [] as Record<string, unknown>[],
 }));
 
 // Identity helpers so GET returns the raw response object.
@@ -35,6 +37,7 @@ vi.mock("@/lib/supabase", () => {
       not: (c: string, op: string) => ((filters[`not_${c}_${op}`] = true), builder),
       is: (c: string, v: unknown) => ((filters[`is_${c}`] = v), builder),
       order: () => builder,
+      maybeSingle: () => Promise.resolve({ data: resolve(filters)[0] ?? null, error: null }),
       then: (onF: (r: unknown) => unknown, onR?: (e: unknown) => unknown) =>
         Promise.resolve({ data: resolve(filters), error: null }).then(onF, onR),
     };
@@ -68,6 +71,10 @@ vi.mock("@/lib/supabase", () => {
               return state.overrides;
             case "income_projections":
               return state.projections;
+            case "vat_state":
+              return state.vatState ? [state.vatState] : [];
+            case "vatable_clients":
+              return state.vatable;
             default:
               return [];
           }
@@ -107,6 +114,8 @@ beforeEach(() => {
   state.hidden = [];
   state.overrides = [];
   state.projections = [];
+  state.vatState = null;
+  state.vatable = [];
 });
 
 afterEach(() => vi.useRealTimers());
@@ -716,5 +725,52 @@ describe("balance walks", () => {
     expect(res.committedOpening[1]).toBe(10000); // anchor excludes it
     expect(res.committedClosing[1]).toBe(10500);
     assertInvariants(res);
+  });
+});
+
+describe("cashflow route: VAT", () => {
+  const vatReq = { url: "http://localhost/api/cashflow?back=1&forward=6" } as Parameters<typeof GET>[0];
+  const runVat = async () => (await GET(vatReq)) as unknown as CashflowResponse;
+  const propInvoice = {
+    xero_id: "i1", type: "ACCREC", total: 12000, total_tax: 2000, amount_due: 0,
+    issue_date: "2026-06-10", due_date: "2026-07-10", status: "AUTHORISED",
+    contact_id: "c1", contact_name: "PropellerNet", line_items: [],
+  };
+
+  it("stays off by default: no VAT fields and no VAT row", async () => {
+    state.invoices = [propInvoice];
+    const res = await runVat();
+    expect(res.vatOwedNow).toBeUndefined();
+    expect(res.vatAdjustedClosing).toBeUndefined();
+    expect(res.cashOut.find((a) => a.accountCode === "VAT_LIABILITY")).toBeUndefined();
+  });
+
+  it("when enabled, accrues the open quarter's issued VAT and bills it at the payment month", async () => {
+    state.vatState = { enabled: true, paid_quarters: [] };
+    state.invoices = [propInvoice];
+    const res = await runVat();
+    const octIndex = res.months.indexOf("2026-10"); // Jun-Aug quarter pays ~7 Oct
+    expect(res.vatOwedNow).toBeCloseTo(2000, 2);
+    const vatRow = res.cashOut.find((a) => a.accountCode === "VAT_LIABILITY");
+    expect(vatRow).toBeDefined();
+    expect(vatRow!.monthly[octIndex]).toBeCloseTo(2000, 2);
+    expect(res.vatAdjustedClosing![res.currentMonthIndex]).toBeCloseTo(
+      res.committedClosing[res.currentMonthIndex] - 2000,
+      2
+    );
+    // Committed closing - opening === net still holds with the VAT outflow in.
+    for (let i = 0; i < res.months.length; i++) {
+      expect(res.committedClosing[i] - res.committedOpening[i]).toBeCloseTo(res.committedNet[i], 2);
+    }
+  });
+
+  it("seeds a zero-tax client as non-VATable so no VAT accrues (IKEA)", async () => {
+    state.vatState = { enabled: true, paid_quarters: [] };
+    state.invoices = [
+      { ...propInvoice, xero_id: "ik1", total: 10000, total_tax: 0, contact_id: "ikea", contact_name: "IKEA" },
+    ];
+    const res = await runVat();
+    expect(res.vatOwedNow).toBeCloseTo(0, 2);
+    expect(res.cashOut.find((a) => a.accountCode === "VAT_LIABILITY")).toBeUndefined();
   });
 });

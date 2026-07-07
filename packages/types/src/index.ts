@@ -57,6 +57,10 @@ export interface CashflowResponse {
   optimisticClosing: number[];
   optimisticNet: number[];
   accounts: CashflowAccountInfo[];
+  // VAT (present only when VAT is enabled). The VAT quarterly bill also appears
+  // as a display-only cost row in cashOut with accountCode "VAT_LIABILITY".
+  vatAdjustedClosing?: number[]; // committed closing minus VAT owed; true spendable cash
+  vatOwedNow?: number; // output VAT accrued on issued invoices this quarter, not yet paid
 }
 
 // One month of a (possibly recurring) projection, expanded at read time.
