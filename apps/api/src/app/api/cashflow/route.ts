@@ -10,6 +10,14 @@ import {
   clientKey,
   type ProjectionRow,
 } from "@/lib/pipeline";
+import {
+  computeVat,
+  invoiceOutputVat,
+  projectionVatByMonth,
+  seedVatableFromTax,
+  resolveVatable,
+  quarterEndForMonth,
+} from "@/lib/vat";
 import type {
   CashflowResponse,
   CashflowAccount,
@@ -82,6 +90,9 @@ export async function GET(request: NextRequest) {
       overrideResult,
       projectionResult,
       assignedResult,
+      vatStateResult,
+      vatableResult,
+      vatInvoiceResult,
     ] = await Promise.all([
       supabase
         .from("xero_bank_transactions")
@@ -133,6 +144,27 @@ export async function GET(request: NextRequest) {
         .select("xero_id, projection_id, status, total, due_date, expected_payment_date")
         .eq("connection_id", connectionId)
         .not("projection_id", "is", null),
+      // VAT: per-connection state (dark-launch flag + paid-quarter markers) and
+      // per-client VATable overrides. Errors (tables absent pre-migration)
+      // resolve to null and degrade to VAT-off rather than 500ing.
+      supabase
+        .from("vat_state")
+        .select("enabled, paid_quarters")
+        .eq("connection_id", connectionId)
+        .maybeSingle(),
+      supabase
+        .from("vatable_clients")
+        .select("client_key, vatable")
+        .eq("connection_id", connectionId),
+      // Committed VAT reads real per-invoice tax off every issued ACCREC invoice
+      // (any status) in the open + prior quarters. Separate from the open-invoice
+      // query so paid-this-quarter invoices are included.
+      supabase
+        .from("xero_invoices")
+        .select("total, total_tax, issue_date, contact_id, contact_name")
+        .eq("connection_id", connectionId)
+        .eq("type", "ACCREC")
+        .gte("issue_date", format(subMonths(now, 8), "yyyy-MM-dd")),
     ]);
 
     const bankTxns = bankTxnResult.data || [];
@@ -484,6 +516,67 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // -----------------------------------------------------------------------
+    // VAT (output VAT only, standard accrual). Committed VAT accrues from real
+    // issued-invoice tax; projected VAT (optimistic only) from VATable clients'
+    // projection remainders. Off unless explicitly enabled (dark launch): a
+    // missing table or disabled flag degrades to today's shape.
+    // -----------------------------------------------------------------------
+    const vatEnabled = vatStateResult.data?.enabled === true;
+    const paidQuarters = new Set<string>(vatStateResult.data?.paid_quarters ?? []);
+    const vatOverride = new Map<string, boolean>(
+      (vatableResult.data ?? []).map((r) => [r.client_key as string, r.vatable as boolean])
+    );
+    const vatInvoices = (vatInvoiceResult.data ?? []) as Array<{
+      total: number | null;
+      total_tax: number | null;
+      issue_date: string | null;
+      contact_id: string | null;
+      contact_name: string | null;
+    }>;
+
+    // Seed VATable per client from the tax on its real invoices.
+    const taxByClient = new Map<string, Array<number | null>>();
+    for (const inv of vatInvoices) {
+      const key = clientKey(inv.contact_id, inv.contact_name);
+      const list = taxByClient.get(key) || [];
+      list.push(inv.total_tax);
+      taxByClient.set(key, list);
+    }
+    const vatableFor = (key: string): boolean =>
+      resolveVatable(vatOverride.get(key), seedVatableFromTax(taxByClient.get(key) ?? []));
+
+    let vatResult: ReturnType<typeof computeVat> | null = null;
+    if (vatEnabled) {
+      const committedVatByIssueMonth = new Map<string, number>();
+      for (const inv of vatInvoices) {
+        if (!inv.issue_date) continue;
+        const key = clientKey(inv.contact_id, inv.contact_name);
+        const vat = invoiceOutputVat(inv.total_tax, Number(inv.total ?? 0), vatableFor(key));
+        if (vat === 0) continue;
+        const m = inv.issue_date.slice(0, 7);
+        committedVatByIssueMonth.set(m, (committedVatByIssueMonth.get(m) ?? 0) + vat);
+      }
+      const projectedVatByExpectedMonth = new Map<string, number>();
+      for (const proj of projections as ProjectionRow[]) {
+        const key = clientKey(proj.contact_id, proj.client_label);
+        if (!vatableFor(key)) continue;
+        const byMonth = projectionVatByMonth(proj, assignedByProjection.get(proj.id) || [], currentMonth);
+        for (const [m, vat] of byMonth) {
+          projectedVatByExpectedMonth.set(m, (projectedVatByExpectedMonth.get(m) ?? 0) + vat);
+        }
+      }
+      vatResult = computeVat({
+        months,
+        currentMonthIndex,
+        committedVatByIssueMonth,
+        projectedVatByExpectedMonth,
+        paidQuarters,
+      });
+    }
+    const vatCommittedBill = (m: string) => vatResult?.committedBillByMonth.get(m) ?? 0;
+    const vatOptimisticExtra = (m: string) => vatResult?.optimisticExtraByMonth.get(m) ?? 0;
+
     // The last 3 calendar months before the current one, independent of the
     // visible window (cash was fetched at least that far back)
     const avgMonths: string[] = [];
@@ -647,6 +740,11 @@ export async function GET(request: NextRequest) {
     const allCashOut = buildCostAccounts();
     const income = buildIncome();
 
+    // Tag each client with its resolved VATable status for the settings UI.
+    if (vatEnabled) {
+      for (const c of income.clients) c.vatable = vatableFor(c.clientKey);
+    }
+
     // Committed = cash + invoices sent + the costs section's forecasts; the
     // headline never includes hope. Optimistic adds unfulfilled projection
     // remainders (R9/R10).
@@ -654,13 +752,32 @@ export async function GET(request: NextRequest) {
     const optimisticNet: number[] = new Array(months.length).fill(0);
     for (let i = 0; i < months.length; i++) {
       const outflows = allCashOut.reduce((s, a) => s + a.monthly[i], 0);
+      // Committed carries VAT on issued invoices only; the optimistic walk also
+      // drops the projected-VAT delta alongside the projected income that
+      // generates it (so neither walk is charged VAT on income it doesn't count).
       committedNet[i] = round(
-        income.totals.paid[i] + income.totals.invoiced[i] - outflows
+        income.totals.paid[i] + income.totals.invoiced[i] - outflows - vatCommittedBill(months[i])
       );
-      optimisticNet[i] = round(committedNet[i] + income.totals.projected[i]);
+      optimisticNet[i] = round(
+        committedNet[i] + income.totals.projected[i] - vatOptimisticExtra(months[i])
+      );
     }
 
     const cashOut = allCashOut.filter((a) => !hiddenCodes.has(a.accountCode));
+
+    // Display-only VAT cost row (the committed quarterly bill in its payment
+    // months). Not part of allCashOut, so it never feeds the outflows sum that
+    // already subtracted the bill from committedNet. The VAT_LIABILITY code is
+    // the sentinel the web uses to render it non-editable.
+    if (vatResult && vatResult.vatRow.some((v) => v !== 0)) {
+      cashOut.push({
+        accountCode: "VAT_LIABILITY",
+        accountName: "VAT",
+        monthly: vatResult.vatRow,
+        isProjected: months.map((_, i) => i >= currentMonthIndex),
+        hasOverride: months.map(() => false),
+      });
+    }
 
     // Balance walks, anchored on the actual bank balance today:
     //   current closing = today + committed remainder (a projected month-end)
@@ -701,10 +818,20 @@ export async function GET(request: NextRequest) {
       if (i < currentMonthIndex) {
         optimisticClosing[i] = committedClosing[i];
       } else {
-        projectedCumulative += income.totals.projected[i];
+        // Net the projected income against the projected VAT it accrues, so the
+        // optimistic walk carries issued (via committedClosing) + projected VAT.
+        projectedCumulative += income.totals.projected[i] - vatOptimisticExtra(months[i]);
         optimisticClosing[i] = round(committedClosing[i] + projectedCumulative);
       }
     }
+
+    // VAT-adjusted line: committed closing minus the running committed liability
+    // (issued VAT owed but not yet paid). Present-and-future only — liability is
+    // 0 over history, so this equals committedClosing there. Continuous across
+    // payment months by construction (both drop by the bill together).
+    const vatAdjustedClosing: number[] = committedClosing.map((c, i) =>
+      round(c - (vatResult?.committedLiability[i] ?? 0))
+    );
 
     // "Falls below £0 in" — format is string-matched by the web app
     function fallsBelow(series: number[]): string | null {
@@ -749,6 +876,12 @@ export async function GET(request: NextRequest) {
       optimisticClosing,
       optimisticNet,
       accounts,
+      // VAT surfaces (present only when VAT is enabled).
+      vatAdjustedClosing: vatResult ? vatAdjustedClosing : undefined,
+      vatOwedNow: vatResult ? vatResult.vatOwedNow : undefined,
+      vatCurrentQuarter: vatResult
+        ? { key: quarterEndForMonth(currentMonth), paid: paidQuarters.has(quarterEndForMonth(currentMonth)) }
+        : undefined,
     };
 
     return json(response);

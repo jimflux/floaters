@@ -95,6 +95,41 @@ describe("CashflowPage cutover safety", () => {
   });
 });
 
+describe("VAT presentation", () => {
+  function vatShape(): CashflowData {
+    return {
+      ...newShape(),
+      vatOwedNow: 2000,
+      vatAdjustedClosing: [10000, 10000, 8000],
+      cashOut: [
+        {
+          accountCode: "VAT_LIABILITY",
+          accountName: "VAT",
+          monthly: [0, 0, 2000],
+          isProjected: [false, true, true],
+          hasOverride: [false, false, false],
+        },
+      ],
+    };
+  }
+
+  it("shows the VAT owed stat and a read-only VAT row when VAT is enabled", async () => {
+    getCashflow.mockResolvedValue(vatShape());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <CashflowPage />
+      </QueryClientProvider>
+    );
+    await screen.findByText("IKEA");
+    expect(screen.getByText("VAT owed")).toBeInTheDocument();
+    // The VAT bill (£2,000) renders as plain text, not inside an editable input.
+    const vatCell = screen.getAllByText("£2,000").find((el) => el.tagName !== "INPUT");
+    expect(vatCell).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /2,000/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("forecast view toggle", () => {
   async function renderPage() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

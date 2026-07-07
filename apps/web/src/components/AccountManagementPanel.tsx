@@ -12,15 +12,24 @@ import type { CashflowAccountInfo, AccountGroup } from '@/lib/types';
 import {
   hideAccount, unhideAccount,
   getAccountGroups, createAccountGroup, deleteAccountGroup,
+  getVatSettings, patchVat,
 } from '@/lib/api';
+
+export interface VatClient {
+  clientKey: string;
+  clientName: string;
+  vatable?: boolean;
+}
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accounts: CashflowAccountInfo[];
+  vatClients?: VatClient[];
+  vatCurrentQuarter?: { key: string; paid: boolean };
 }
 
-export default function AccountManagementPanel({ open, onOpenChange, accounts }: Props) {
+export default function AccountManagementPanel({ open, onOpenChange, accounts, vatClients = [], vatCurrentQuarter }: Props) {
   const queryClient = useQueryClient();
   const costAccounts = accounts.filter(a => a.section === 'costs');
 
@@ -34,6 +43,7 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts }:
           <TabsList className="mx-6 mb-2">
             <TabsTrigger value="accounts" className="text-xs">Accounts</TabsTrigger>
             <TabsTrigger value="groups" className="text-xs">Groups</TabsTrigger>
+            <TabsTrigger value="vat" className="text-xs">VAT</TabsTrigger>
           </TabsList>
           <TabsContent value="accounts" className="flex-1 overflow-y-auto px-6 pb-6">
             <AccountsTab
@@ -44,9 +54,99 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts }:
           <TabsContent value="groups" className="flex-1 overflow-y-auto px-6 pb-6">
             <GroupsTab accounts={accounts} queryClient={queryClient} />
           </TabsContent>
+          <TabsContent value="vat" className="flex-1 overflow-y-auto px-6 pb-6">
+            <VatTab vatClients={vatClients} vatCurrentQuarter={vatCurrentQuarter} queryClient={queryClient} />
+          </TabsContent>
         </Tabs>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function VatTab({
+  vatClients, vatCurrentQuarter, queryClient,
+}: {
+  vatClients: VatClient[];
+  vatCurrentQuarter?: { key: string; paid: boolean };
+  queryClient: ReturnType<typeof useQueryClient>;
+}) {
+  const { data: vat } = useQuery({ queryKey: ['vat'], queryFn: getVatSettings });
+  const enabled = vat?.enabled ?? false;
+
+  const mutate = useMutation({
+    mutationFn: patchVat,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vat'] });
+      queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+    },
+    onError: () => toast.error('Failed to update VAT settings'),
+  });
+
+  // Prefer the resolved flag from the cashflow response; fall back to the
+  // stored override when the client isn't in the current grid.
+  const overrideFor = (key: string) => vat?.overrides.find(o => o.clientKey === key)?.vatable;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between py-1.5">
+        <div className="min-w-0">
+          <p className="text-sm">Enable VAT</p>
+          <p className="text-xs text-muted-foreground">Accrue output VAT and show the quarterly bill</p>
+        </div>
+        <Switch
+          checked={enabled}
+          disabled={mutate.isPending}
+          onCheckedChange={(v) => mutate.mutate({ enabled: v })}
+        />
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Standard accrual, 20%. Quarters end May, Aug, Nov, Feb; paid ~1 month + 7 days after.
+      </p>
+
+      {enabled && (
+        <>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-2">VATable clients</p>
+            <div className="space-y-1">
+              {vatClients.length === 0 && (
+                <p className="text-xs text-muted-foreground">No clients in the current view.</p>
+              )}
+              {vatClients.map(c => {
+                const checked = c.vatable ?? overrideFor(c.clientKey) ?? true;
+                return (
+                  <div key={c.clientKey} className="flex items-center justify-between py-1.5">
+                    <p className="text-sm truncate">{c.clientName}</p>
+                    <Switch
+                      checked={checked}
+                      disabled={mutate.isPending}
+                      onCheckedChange={(v) => mutate.mutate({ clientKey: c.clientKey, vatable: v })}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {vatCurrentQuarter && (
+            <label className="flex items-center gap-2 py-1.5 cursor-pointer">
+              <Checkbox
+                checked={vatCurrentQuarter.paid}
+                disabled={mutate.isPending}
+                onCheckedChange={(v) =>
+                  mutate.mutate(
+                    v
+                      ? { markPaidQuarter: vatCurrentQuarter.key }
+                      : { unmarkPaidQuarter: vatCurrentQuarter.key }
+                  )
+                }
+              />
+              <span className="text-sm">This quarter's VAT is paid</span>
+            </label>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

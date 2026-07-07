@@ -28,6 +28,7 @@ export interface IncomeClient {
   invoiced: number[];
   projected: number[];
   overdue: boolean[]; // month's invoiced layer contains an overdue invoice
+  vatable?: boolean; // resolved VATable status (present only when VAT is enabled)
 }
 
 export interface IncomeSection {
@@ -57,6 +58,11 @@ export interface CashflowResponse {
   optimisticClosing: number[];
   optimisticNet: number[];
   accounts: CashflowAccountInfo[];
+  // VAT (present only when VAT is enabled). The VAT quarterly bill also appears
+  // as a display-only cost row in cashOut with accountCode "VAT_LIABILITY".
+  vatAdjustedClosing?: number[]; // committed closing minus VAT owed; true spendable cash
+  vatOwedNow?: number; // output VAT accrued on issued invoices this quarter, not yet paid
+  vatCurrentQuarter?: { key: string; paid: boolean }; // open quarter-end key + whether marked paid
 }
 
 // One month of a (possibly recurring) projection, expanded at read time.
