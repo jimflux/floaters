@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CashflowData } from "@/lib/types";
 
@@ -92,5 +92,33 @@ describe("CashflowPage cutover safety", () => {
     expect(screen.getByText("↗ Income")).toBeInTheDocument();
     // The fresh payload was cached under the versioned key
     expect(localStorage.getItem(CASHFLOW_CACHE_KEY)).toContain("contact:c1");
+  });
+});
+
+describe("forecast view toggle", () => {
+  async function renderPage() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <CashflowPage />
+      </QueryClientProvider>
+    );
+    await screen.findByText("IKEA");
+  }
+
+  it("defaults to committed: the ending balance is the committed walk, flat at £10,000", async () => {
+    await renderPage();
+    // committedClosing is [10000, 10000, 10000]; the optimistic ending (£55,500)
+    // is only the lighter overlay, not the ending-balance row.
+    expect(screen.getByText("Net cash movement")).toBeInTheDocument();
+    expect(screen.queryByText("Net cash movement (projected)")).not.toBeInTheDocument();
+  });
+
+  it("majoring on projected swaps the summary rows to the optimistic walk", async () => {
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Projected" }));
+    // Net row relabels and the optimistic ending (£55,500) now leads the walk.
+    expect(screen.getByText("Net cash movement (projected)")).toBeInTheDocument();
+    expect(screen.getAllByText("£55,500").length).toBeGreaterThan(0);
   });
 });

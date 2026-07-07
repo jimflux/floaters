@@ -22,11 +22,17 @@ function formatGBP(n: number): string {
 
 interface AlignedChartProps {
   months: string[];
-  closingBalance: number[]; // committed: the headline series
-  optimisticClosing?: number[]; // committed + unfulfilled projections
+  closingBalance: number[]; // the primary (bold) series
+  optimisticClosing?: number[]; // the secondary (lighter) series
   currentMonthIndex: number;
   formatMonth: (m: string) => string;
   colWidth?: number;
+  // Legend/tooltip labels and the secondary line colour. Callers swap the two
+  // series (and these) to major on committed vs projected without the chart
+  // needing to know which is which.
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  secondaryStroke?: string;
 }
 
 export default function AlignedChart({
@@ -36,6 +42,9 @@ export default function AlignedChart({
   currentMonthIndex,
   formatMonth,
   colWidth = COL_WIDTH,
+  primaryLabel = 'Committed',
+  secondaryLabel = 'If projections land',
+  secondaryStroke = OPTIMISTIC_STROKE,
 }: AlignedChartProps) {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; month: string; value: number; optimistic: number } | null>(null);
 
@@ -172,7 +181,7 @@ export default function AlignedChart({
 
         {/* Optimistic line (lighter, dashed) */}
         {hasDivergence && optFutPoints.length > 1 && (
-          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={OPTIMISTIC_STROKE} strokeWidth={1.5} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={secondaryStroke} strokeWidth={1.5} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Tooltip crosshair (the dot is an HTML overlay below) */}
@@ -223,11 +232,11 @@ export default function AlignedChart({
         <div className="absolute top-1 right-2 flex items-center gap-3 text-[10px] text-muted-foreground bg-card/80 rounded px-1.5 py-0.5 pointer-events-none">
           <span className="flex items-center gap-1">
             <span className="inline-block w-3 border-t-2 border-foreground" />
-            Committed
+            {primaryLabel}
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: OPTIMISTIC_STROKE }} />
-            If projections land
+            <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: secondaryStroke }} />
+            {secondaryLabel}
           </span>
         </div>
       )}
@@ -245,8 +254,8 @@ export default function AlignedChart({
           <div className="text-muted-foreground">{tooltip.month}</div>
           <div className="font-semibold tabular-nums">{formatGBP(tooltip.value)}</div>
           {Math.abs(tooltip.optimistic - tooltip.value) > 0.005 && (
-            <div className="tabular-nums" style={{ color: OPTIMISTIC_STROKE }}>
-              {formatGBP(tooltip.optimistic)} if projections land
+            <div className="tabular-nums" style={{ color: secondaryStroke }}>
+              {formatGBP(tooltip.optimistic)} · {secondaryLabel}
             </div>
           )}
         </div>

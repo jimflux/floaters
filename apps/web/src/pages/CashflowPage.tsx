@@ -14,7 +14,12 @@ import AccountManagementPanel from '@/components/AccountManagementPanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
 import CashflowMobile from '@/components/CashflowMobile';
+import ForecastViewToggle from '@/components/ForecastViewToggle';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useForecastView } from '@/hooks/use-forecast-view';
+
+const SECONDARY_STROKE_COMMITTED = 'hsl(38 92% 50%)'; // amber: optimistic as the secondary line
+const SECONDARY_STROKE_PROJECTED = 'hsl(var(--muted-foreground))'; // committed, muted, as the secondary line
 
 const LABEL_WIDTH = 200;
 
@@ -52,6 +57,7 @@ export default function CashflowPage() {
   // The pipeline panel (review tray + projections manager) opens from the
   // income header's + button and the header badge.
   const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [view, setView] = useForecastView();
 
   const { data, isLoading, isError, error } = useQuery<CashflowData>({
     queryKey: ['cashflow'],
@@ -121,9 +127,24 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, accounts = [] } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [] } = data;
   const currentMonth = months[currentMonthIndex];
   const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
+
+  // Which basis leads the chart, stats and summary rows. The optimistic walk
+  // is committed + unfulfilled projections; over history the two are identical,
+  // so opening balances only diverge in the future (derive from the prior
+  // closing to keep opening === prior ending in projected mode).
+  const projected = view === 'projected';
+  const optimisticNetSeries = optimisticNet ?? committedNet;
+  const primaryClosing = projected ? optimisticClosing : committedClosing;
+  const primaryNet = projected ? optimisticNetSeries : committedNet;
+  const primaryOpening = projected
+    ? committedOpening.map((_, i) => (i === 0 ? committedOpening[0] : optimisticClosing[i - 1]))
+    : committedOpening;
+  const primaryFallsBelow = projected ? optimisticFallsBelowZeroIn : fallsBelowZeroIn;
+  const secondaryFallsBelow = projected ? fallsBelowZeroIn : optimisticFallsBelowZeroIn;
+  const secondaryFallsLabel = projected ? 'Cash only (committed)' : 'If projections land';
 
   const minTotalWidth = LABEL_WIDTH + months.length * COL_WIDTH;
   const responsiveGridWidth = `max(${minTotalWidth}px, 100%)`;
@@ -136,6 +157,7 @@ export default function CashflowPage() {
         <span className="font-semibold text-sm tracking-tight">Floaters</span>
         <div className="flex items-center gap-3">
           {lastSync && <span className="text-xs text-muted-foreground">Synced {formatTimeAgo(lastSync)}</span>}
+          <ForecastViewToggle view={view} onChange={setView} />
           <Button variant="outline" size="sm" className="relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
             <Inbox className="h-3.5 w-3.5" />
             <span className="ml-1.5">Pipeline</span>
@@ -172,12 +194,12 @@ export default function CashflowPage() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Drops below £0</p>
-                  <p className={`text-2xl font-bold tracking-tight ${getZeroColor(fallsBelowZeroIn)}`}>
-                    {fallsBelowZeroIn || 'Never'}
+                  <p className={`text-2xl font-bold tracking-tight ${getZeroColor(primaryFallsBelow)}`}>
+                    {primaryFallsBelow || 'Never'}
                   </p>
-                  {optimisticFallsBelowZeroIn !== fallsBelowZeroIn && (
+                  {secondaryFallsBelow !== primaryFallsBelow && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      If projections land: {optimisticFallsBelowZeroIn || 'Never'}
+                      {secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}
                     </p>
                   )}
                 </div>
@@ -187,11 +209,14 @@ export default function CashflowPage() {
               <div className="shrink-0" style={{ width: `calc(100% - ${LABEL_WIDTH}px)` }}>
                 <AlignedChart
                   months={months}
-                  closingBalance={committedClosing}
-                  optimisticClosing={optimisticClosing}
+                  closingBalance={primaryClosing}
+                  optimisticClosing={projected ? committedClosing : optimisticClosing}
                   currentMonthIndex={currentMonthIndex}
                   formatMonth={formatMonth}
                   colWidth={undefined}
+                  primaryLabel={projected ? 'Projected' : 'Committed'}
+                  secondaryLabel={secondaryFallsLabel}
+                  secondaryStroke={projected ? SECONDARY_STROKE_PROJECTED : SECONDARY_STROKE_COMMITTED}
                 />
               </div>
             </div>
@@ -216,7 +241,7 @@ export default function CashflowPage() {
               </thead>
               <tbody>
                 {/* Opening balance */}
-                <SummaryRow label="Opening balance" values={committedOpening} months={months} currentMonthIndex={currentMonthIndex} />
+                <SummaryRow label="Opening balance" values={primaryOpening} months={months} currentMonthIndex={currentMonthIndex} />
 
                 {/* Income section: client rollups in three layers */}
                 <IncomeSection
@@ -238,11 +263,12 @@ export default function CashflowPage() {
                   <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
                 ))}
 
-                {/* Net cash movement (committed: never includes hope) */}
-                <SummaryRow label="Net cash movement" values={committedNet} months={months} currentMonthIndex={currentMonthIndex} bold colored />
+                {/* Net cash movement: committed never includes hope; projected
+                    adds unfulfilled projection remainders. */}
+                <SummaryRow label={projected ? 'Net cash movement (projected)' : 'Net cash movement'} values={primaryNet} months={months} currentMonthIndex={currentMonthIndex} bold colored />
 
                 {/* Closing balance */}
-                <SummaryRow label="Ending balance" values={committedClosing} months={months} currentMonthIndex={currentMonthIndex} />
+                <SummaryRow label="Ending balance" values={primaryClosing} months={months} currentMonthIndex={currentMonthIndex} />
               </tbody>
             </table>
           </div>
