@@ -14,6 +14,9 @@ const updateSchema = z.object({
     .regex(/^\d{4}-\d{2}$/)
     .optional(),
   contactId: z.string().min(1).nullable().optional(),
+  recurrenceCount: z.number().int().min(1).max(120).optional(),
+  escalationPct: z.number().min(0).max(1000).optional(),
+  escalationEvery: z.number().int().min(1).max(120).nullable().optional(),
 });
 
 export async function PATCH(
@@ -40,6 +43,9 @@ export async function PATCH(
     if (parsed.data.amount !== undefined) patch.amount = parsed.data.amount;
     if (parsed.data.expectedMonth !== undefined) patch.expected_month = parsed.data.expectedMonth;
     if (parsed.data.contactId !== undefined) patch.contact_id = parsed.data.contactId;
+    if (parsed.data.recurrenceCount !== undefined) patch.recurrence_count = parsed.data.recurrenceCount;
+    if (parsed.data.escalationPct !== undefined) patch.escalation_pct = parsed.data.escalationPct;
+    if (parsed.data.escalationEvery !== undefined) patch.escalation_every = parsed.data.escalationEvery;
 
     const { data, error: dbError } = await supabase
       .from("income_projections")

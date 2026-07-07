@@ -59,6 +59,15 @@ export interface CashflowResponse {
   accounts: CashflowAccountInfo[];
 }
 
+// One month of a (possibly recurring) projection, expanded at read time.
+export interface ProjectionOccurrence {
+  month: string; // yyyy-MM
+  amount: number; // escalated amount for this occurrence
+  consumed: number; // assigned invoice totals attributed to this month
+  remainder: number; // amount minus consumed, floor 0
+  lapsed: boolean; // month passed with remainder > 0
+}
+
 // GET /api/pipeline — item-level view for the review tray, the projections
 // manager, and agent consumers.
 export interface PipelineProjection {
@@ -66,11 +75,17 @@ export interface PipelineProjection {
   clientKey: string;
   clientLabel: string;
   contactId: string | null;
-  amount: number; // VAT-inclusive
-  expectedMonth: string; // yyyy-MM
-  remainder: number; // amount minus consumed, floor 0
-  consumed: number; // Σ assigned invoice totals (excl. VOIDED/DELETED); > amount means over-assigned
-  lapsed: boolean; // expected month passed with remainder > 0 (derived)
+  amount: number; // VAT-inclusive, per occurrence (the base amount)
+  expectedMonth: string; // yyyy-MM, the first/start occurrence
+  // Recurrence: recurrenceCount monthly occurrences from expectedMonth,
+  // stepping up escalationPct every escalationEvery occurrences (compounding).
+  recurrenceCount: number; // 1 = single-shot
+  escalationPct: number; // 0 = flat
+  escalationEvery: number | null; // occurrences per step; null = no escalation
+  occurrences: ProjectionOccurrence[]; // one per month of the series
+  remainder: number; // Σ occurrence remainders across the series
+  consumed: number; // Σ assigned invoice totals (excl. VOIDED/DELETED); > total means over-assigned
+  lapsed: boolean; // any occurrence's month passed with remainder > 0
   invoiceIds: string[];
   createdAt: string;
   updatedAt: string;

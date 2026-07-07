@@ -39,6 +39,10 @@ function pipeline(overrides: Partial<PipelineResponse> = {}): PipelineResponse {
         contactId: "c-ikea",
         amount: 45000,
         expectedMonth: "2026-07",
+        recurrenceCount: 1,
+        escalationPct: 0,
+        escalationEvery: null,
+        occurrences: [],
         remainder: 25000,
         consumed: 20000,
         lapsed: false,
@@ -53,6 +57,10 @@ function pipeline(overrides: Partial<PipelineResponse> = {}): PipelineResponse {
         contactId: null,
         amount: 21000,
         expectedMonth: "2026-04",
+        recurrenceCount: 1,
+        escalationPct: 0,
+        escalationEvery: null,
+        occurrences: [],
         remainder: 21000,
         consumed: 0,
         lapsed: true,
@@ -237,6 +245,37 @@ describe("projections manager", () => {
     fireEvent.click(screen.getByText("Add projection", { selector: "button" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(createProjection).not.toHaveBeenCalled();
+  });
+
+  it("creates a recurring projection with escalation from the form", async () => {
+    const qc = qcFactory();
+    renderPanel(qc);
+    fireEvent.mouseDown(screen.getByText("Projections"));
+
+    // Client via the picker's free-text input.
+    fireEvent.click(await screen.findByText("Client…"));
+    fireEvent.change(screen.getByPlaceholderText("Client name…"), { target: { value: "Retainer Co" } });
+
+    fireEvent.click(screen.getByLabelText("Repeats monthly"));
+    fireEvent.change(screen.getByLabelText("Amount (inc VAT)"), { target: { value: "10000" } });
+    fireEvent.change(screen.getByLabelText("Start month"), { target: { value: "2026-08" } });
+    fireEvent.change(screen.getByLabelText("For (months)"), { target: { value: "6" } });
+    fireEvent.click(screen.getByLabelText("Step up over time"));
+    fireEvent.change(screen.getByLabelText("Percent increase"), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Occurrences per step"), { target: { value: "12" } });
+
+    fireEvent.click(screen.getByText(/Add projection \(6 months\)/, { selector: "button" }));
+
+    await waitFor(() => expect(createProjection).toHaveBeenCalled());
+    expect(createProjection.mock.calls[0][0]).toEqual({
+      clientLabel: "Retainer Co",
+      amount: 10000,
+      expectedMonth: "2026-08",
+      contactId: null,
+      recurrenceCount: 6,
+      escalationPct: 5,
+      escalationEvery: 12,
+    });
   });
 
   it("renders the projections empty state (D5)", async () => {
