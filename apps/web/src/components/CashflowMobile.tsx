@@ -53,7 +53,7 @@ interface Props {
 
 export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatCurrentQuarter } = data;
 
   const [view, setView] = useForecastView();
   const projected = view === 'projected';
@@ -268,7 +268,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
         <SummaryRowMobile label="Ending balance" value={primaryClosing[activeIdx]} />
       </div>
 
-      <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+      <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
     </div>
   );

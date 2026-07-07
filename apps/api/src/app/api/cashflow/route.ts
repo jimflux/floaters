@@ -16,6 +16,7 @@ import {
   projectionVatByMonth,
   seedVatableFromTax,
   resolveVatable,
+  quarterEndForMonth,
 } from "@/lib/vat";
 import type {
   CashflowResponse,
@@ -739,6 +740,11 @@ export async function GET(request: NextRequest) {
     const allCashOut = buildCostAccounts();
     const income = buildIncome();
 
+    // Tag each client with its resolved VATable status for the settings UI.
+    if (vatEnabled) {
+      for (const c of income.clients) c.vatable = vatableFor(c.clientKey);
+    }
+
     // Committed = cash + invoices sent + the costs section's forecasts; the
     // headline never includes hope. Optimistic adds unfulfilled projection
     // remainders (R9/R10).
@@ -873,6 +879,9 @@ export async function GET(request: NextRequest) {
       // VAT surfaces (present only when VAT is enabled).
       vatAdjustedClosing: vatResult ? vatAdjustedClosing : undefined,
       vatOwedNow: vatResult ? vatResult.vatOwedNow : undefined,
+      vatCurrentQuarter: vatResult
+        ? { key: quarterEndForMonth(currentMonth), paid: paidQuarters.has(quarterEndForMonth(currentMonth)) }
+        : undefined,
     };
 
     return json(response);

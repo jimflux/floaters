@@ -127,7 +127,7 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatCurrentQuarter } = data;
   const currentMonth = months[currentMonthIndex];
   const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
 
@@ -282,7 +282,7 @@ export default function CashflowPage() {
         </div>
       </div>
 
-      <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} />
+      <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
     </div>
   );

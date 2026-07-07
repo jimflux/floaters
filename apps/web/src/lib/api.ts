@@ -85,6 +85,37 @@ export function deleteAccountGroup(id: string): Promise<void> {
   });
 }
 
+export interface VatSettings {
+  enabled: boolean;
+  paidQuarters: string[];
+  overrides: { clientKey: string; vatable: boolean }[];
+}
+
+export function getVatSettings(): Promise<VatSettings> {
+  return fetch(`${API_BASE}/api/vat`, { headers }).then(res => {
+    if (!res.ok) throw new Error(`Fetch VAT settings failed: ${res.status}`);
+    return res.json();
+  });
+}
+
+export interface VatPatch {
+  enabled?: boolean;
+  clientKey?: string;
+  vatable?: boolean;
+  markPaidQuarter?: string;
+  unmarkPaidQuarter?: string;
+}
+
+export function patchVat(patch: VatPatch): Promise<void> {
+  return fetch(`${API_BASE}/api/vat`, {
+    method: 'PATCH',
+    headers: jsonHeaders,
+    body: JSON.stringify(patch),
+  }).then(res => {
+    if (!res.ok) throw new Error(`Update VAT settings failed: ${res.status}`);
+  });
+}
+
 export interface ProjectionOverrideEntry {
   accountCode: string;
   month: string;
