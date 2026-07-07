@@ -24,6 +24,9 @@ export interface XeroInvoice {
   Status: "DRAFT" | "SUBMITTED" | "AUTHORISED" | "PAID" | "VOIDED" | "DELETED";
   CurrencyCode: string;
   Total: number;
+  // VAT-inclusive Total minus the tax; the real output VAT for this invoice.
+  // Xero sends it on the invoice object; absent on older cached payloads.
+  TotalTax?: number;
   AmountDue: number;
   AmountPaid: number;
   Date: string;

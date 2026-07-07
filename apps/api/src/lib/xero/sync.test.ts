@@ -112,6 +112,7 @@ describe("mapInvoice", () => {
     Status: "AUTHORISED",
     CurrencyCode: "GBP",
     Total: 1200,
+    TotalTax: 200,
     AmountDue: 600,
     AmountPaid: 600,
     Date: "2026-05-01",
@@ -135,6 +136,13 @@ describe("mapInvoice", () => {
   it("never writes expected_payment_date (locally owned column)", () => {
     const row = mapInvoice("conn", invoice)!;
     expect(Object.keys(row)).not.toContain("expected_payment_date");
+  });
+
+  it("maps TotalTax, preserving a genuine zero and NULLing an absent value", () => {
+    expect(mapInvoice("conn", invoice)!.total_tax).toBe(200);
+    expect(mapInvoice("conn", { ...invoice, TotalTax: 0 })!.total_tax).toBe(0);
+    const { TotalTax: _omit, ...noTax } = invoice;
+    expect(mapInvoice("conn", noTax as XeroInvoice)!.total_tax).toBeNull();
   });
 
   it("returns null on unparseable dates", () => {

@@ -249,6 +249,9 @@ export function mapInvoice(
     status: inv.Status,
     currency_code: inv.CurrencyCode || "GBP",
     total: inv.Total,
+    // Real output VAT from Xero. null when absent (older payloads) so an
+    // un-synced invoice stays distinguishable from a genuine zero-VAT one.
+    total_tax: inv.TotalTax ?? null,
     amount_due: inv.AmountDue,
     amount_paid: inv.AmountPaid || 0,
     issue_date: issueDate,
