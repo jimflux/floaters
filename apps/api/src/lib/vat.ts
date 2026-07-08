@@ -127,6 +127,10 @@ export interface VatResult {
   vatOwedNow: number;
   // Committed VAT bill per months[] index, for the display cost row.
   vatRow: number[];
+  // Issued + projected VAT bill per months[] index. Shown in the cost row when
+  // the dashboard majors on the projected walk, so the row reconciles with the
+  // optimistic line (a future all-projected quarter reads its bill, not £0).
+  vatRowProjected: number[];
 }
 
 /**
@@ -168,6 +172,7 @@ export function computeVat(params: {
   const committedBillByMonth = new Map<string, number>();
   const optimisticExtraByMonth = new Map<string, number>();
   const vatRow = new Array(months.length).fill(0);
+  const vatRowProjected = new Array(months.length).fill(0);
   const monthIndex = new Map(months.map((m, i) => [m, i]));
 
   const allQuarters = new Set<string>([...committedByQuarter.keys(), ...projectedByQuarter.keys()]);
@@ -188,7 +193,12 @@ export function computeVat(params: {
       optimisticExtraByMonth.set(paymentMonth, round2((optimisticExtraByMonth.get(paymentMonth) ?? 0) + projected));
     }
     const idx = monthIndex.get(paymentMonth);
-    if (idx !== undefined && committed !== 0) vatRow[idx] = round2(vatRow[idx] + committed);
+    if (idx !== undefined) {
+      if (committed !== 0) vatRow[idx] = round2(vatRow[idx] + committed);
+      if (committed !== 0 || projected !== 0) {
+        vatRowProjected[idx] = round2(vatRowProjected[idx] + committed + projected);
+      }
+    }
   }
 
   // Running committed liability: accrued (issued VAT, issue month <= i) minus
@@ -216,5 +226,6 @@ export function computeVat(params: {
     committedLiability,
     vatOwedNow: committedLiability[currentMonthIndex] ?? 0,
     vatRow,
+    vatRowProjected,
   };
 }

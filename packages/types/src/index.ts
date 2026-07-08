@@ -62,6 +62,7 @@ export interface CashflowResponse {
   // as a display-only cost row in cashOut with accountCode "VAT_LIABILITY".
   vatAdjustedClosing?: number[]; // committed closing minus VAT owed; true spendable cash
   vatOwedNow?: number; // output VAT accrued on issued invoices this quarter, not yet paid
+  vatProjectedBill?: number[]; // issued + projected VAT bill per month; the VAT cost row uses this on the projected view
   vatCurrentQuarter?: { key: string; paid: boolean }; // open quarter-end key + whether marked paid
 }
 

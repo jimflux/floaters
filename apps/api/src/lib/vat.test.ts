@@ -165,6 +165,22 @@ describe("computeVat", () => {
     expect(r.committedBillByMonth.size).toBe(0);
     expect(r.vatOwedNow).toBe(0);
     expect(r.optimisticExtraByMonth.get("2026-10")).toBe(1000);
+    // The projected row carries the projected bill even though the committed row is £0.
+    expect(r.vatRow[months.indexOf("2026-10")]).toBe(0);
+    expect(r.vatRowProjected[months.indexOf("2026-10")]).toBe(1000);
+  });
+
+  it("shows issued + projected VAT in the projected row for a mixed quarter", () => {
+    const r = computeVat({
+      months,
+      currentMonthIndex: 0,
+      committedVatByIssueMonth: new Map([["2026-07", 30000]]), // Jun-Aug quarter, pays 2026-10
+      projectedVatByExpectedMonth: new Map([["2026-08", 1000]]), // same quarter
+      paidQuarters: new Set(),
+    });
+    const oct = months.indexOf("2026-10");
+    expect(r.vatRow[oct]).toBe(30000); // committed view: issued only
+    expect(r.vatRowProjected[oct]).toBe(31000); // projected view: issued + projected
   });
 
   it("treats a past-due quarter as already paid (no outflow, nets out of liability)", () => {

@@ -765,11 +765,17 @@ export async function GET(request: NextRequest) {
 
     const cashOut = allCashOut.filter((a) => !hiddenCodes.has(a.accountCode));
 
-    // Display-only VAT cost row (the committed quarterly bill in its payment
-    // months). Not part of allCashOut, so it never feeds the outflows sum that
-    // already subtracted the bill from committedNet. The VAT_LIABILITY code is
-    // the sentinel the web uses to render it non-editable.
-    if (vatResult && vatResult.vatRow.some((v) => v !== 0)) {
+    // Display-only VAT cost row. `monthly` carries the committed (issued-only)
+    // bill for the committed view; the projected view swaps in vatProjectedBill
+    // client-side. Not part of allCashOut, so it never feeds the outflows sum
+    // that already subtracted the bill from committedNet. The VAT_LIABILITY code
+    // is the sentinel the web uses to render it non-editable. Push whenever
+    // either series has a bill, so a projected-only quarter still gets a row.
+    if (
+      vatResult &&
+      (vatResult.vatRow.some((v) => v !== 0) ||
+        vatResult.vatRowProjected.some((v) => v !== 0))
+    ) {
       cashOut.push({
         accountCode: "VAT_LIABILITY",
         accountName: "VAT",
@@ -879,6 +885,7 @@ export async function GET(request: NextRequest) {
       // VAT surfaces (present only when VAT is enabled).
       vatAdjustedClosing: vatResult ? vatAdjustedClosing : undefined,
       vatOwedNow: vatResult ? vatResult.vatOwedNow : undefined,
+      vatProjectedBill: vatResult ? vatResult.vatRowProjected : undefined,
       vatCurrentQuarter: vatResult
         ? { key: quarterEndForMonth(currentMonth), paid: paidQuarters.has(quarterEndForMonth(currentMonth)) }
         : undefined,
