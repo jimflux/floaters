@@ -16,8 +16,9 @@ const jsonHeaders = { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'app
 // UI would crash it — the web build does not typecheck, so the version bump is
 // the only guard. v3 adds the VAT surfaces (vatAdjustedClosing, vatOwedNow, the
 // VAT_LIABILITY cost row); additive, but bumped so a stale v2 payload can't
-// hydrate the VAT-aware UI.
-export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v3';
+// hydrate the VAT-aware UI. v4 adds vatProjectedBill (issued + projected VAT for
+// the VAT cost row on the projected view).
+export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v4';
 export const OVERRIDES_CACHE_KEY = 'projection_overrides_cache_v2';
 
 export function getCashflow(): Promise<CashflowData> {

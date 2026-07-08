@@ -127,7 +127,7 @@ export default function CashflowPage() {
 
   if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
 
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatCurrentQuarter } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
   const currentMonth = months[currentMonthIndex];
   const unreviewed = unreviewedByClientMonth(pipeline, currentMonth);
 
@@ -266,9 +266,16 @@ export default function CashflowPage() {
 
                 {/* Costs section */}
                 <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
-                {costsOpen && cashOut.map((account, idx) => (
-                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
-                ))}
+                {costsOpen && cashOut.map((account, idx) => {
+                  // On the projected view the VAT row shows issued + projected VAT
+                  // (matches the projected balance line); committed view keeps issued-only.
+                  const displayAccount = projected && account.accountCode === 'VAT_LIABILITY' && vatProjectedBill
+                    ? { ...account, monthly: vatProjectedBill }
+                    : account;
+                  return (
+                    <AccountRow key={account.accountCode} account={displayAccount} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
+                  );
+                })}
 
                 {/* Net cash movement: committed never includes hope; projected
                     adds unfulfilled projection remainders. */}

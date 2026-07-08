@@ -53,7 +53,7 @@ interface Props {
 
 export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
   const queryClient = useQueryClient();
-  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatCurrentQuarter } = data;
+  const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
 
   const [view, setView] = useForecastView();
   const projected = view === 'projected';
@@ -251,17 +251,24 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
           onToggle={() => setCostsOpen(!costsOpen)}
           accent="border-l-section-costs"
         />
-        {costsOpen && cashOut.map((account, idx) => (
-          <AccountRowMobile
-            key={account.accountCode}
-            account={account}
-            monthIndex={activeIdx}
-            months={months}
-            currentMonthIndex={currentMonthIndex}
-            isAlt={idx % 2 === 1}
-            overrideAmounts={overrideAmounts}
-          />
-        ))}
+        {costsOpen && cashOut.map((account, idx) => {
+          // Projected view shows issued + projected VAT in the VAT row (matches
+          // the projected line); committed view keeps issued-only.
+          const displayAccount = projected && account.accountCode === 'VAT_LIABILITY' && vatProjectedBill
+            ? { ...account, monthly: vatProjectedBill }
+            : account;
+          return (
+            <AccountRowMobile
+              key={account.accountCode}
+              account={displayAccount}
+              monthIndex={activeIdx}
+              months={months}
+              currentMonthIndex={currentMonthIndex}
+              isAlt={idx % 2 === 1}
+              overrideAmounts={overrideAmounts}
+            />
+          );
+        })}
 
         {/* Net + Ending */}
         <SummaryRowMobile label={projected ? 'Net cash movement (projected)' : 'Net cash movement'} value={primaryNet[activeIdx]} bold colored />
