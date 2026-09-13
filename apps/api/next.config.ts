@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 // Serve it at the root too. The app has no client-side routing, so a single
 // root rewrite is enough.
 const nextConfig: NextConfig = {
+  // The MCP tool definitions are TypeScript source in a workspace package.
+  transpilePackages: ["@floaters/mcp-tools"],
   async rewrites() {
     return [{ source: "/", destination: "/index.html" }];
   },

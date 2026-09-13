@@ -25,7 +25,9 @@
   },
   "homepage": "https://github.com/jimflux/floaters#readme",
   "dependencies": {
+    "@floaters/mcp-tools": "*",
     "@floaters/types": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/supabase-js": "^2.98.0",
     "bottleneck": "^2.19.5",
     "date-fns": "^4.1.0",

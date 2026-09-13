@@ -3,15 +3,23 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// index.ts connects a stdio transport on import, so assert against the source.
-// String assertions keep the tool descriptions honest about the pipeline
-// semantics agent consumers rely on (plan U8).
-const src = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "index.ts"),
-  "utf8"
-);
+// index.ts connects a stdio transport on import, so assert against the source
+// of the shared tool module instead. String assertions keep the tool
+// descriptions honest about the pipeline semantics agent consumers rely on
+// (plan U8).
+const here = dirname(fileURLToPath(import.meta.url));
+const shared = readFileSync(join(here, "../../../packages/mcp-tools/src/index.ts"), "utf8");
+const entry = readFileSync(join(here, "index.ts"), "utf8");
+// Tool names also appear in the TOOL_NAMES list above the registrations, so
+// slice the registration section only.
+const src = shared.slice(shared.indexOf("export function registerFloatersTools"));
 
 describe("MCP tool registration", () => {
+  it("wires the shared tools into the stdio server", () => {
+    expect(entry).toContain("registerFloatersTools(server, apiGet)");
+    expect(entry).toContain("StdioServerTransport");
+  });
+
   it("registers the pipeline tool alongside the existing four", () => {
     for (const tool of [
       "get_cashflow",

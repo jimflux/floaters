@@ -1,9 +1,15 @@
-# @floaters/mcp
+# Floaters MCP
 
-A **read-only** [MCP](https://modelcontextprotocol.io) server that exposes the
-Floaters cash flow data to OpenClaw (and any other MCP client). It's a thin
-client over the Floaters API's GET endpoints, so it can only ever read — it
-reuses the same cashflow/forecast computation the web app sees.
+A **read-only** [MCP](https://modelcontextprotocol.io) surface over the Floaters
+cash flow data. The tools live in `packages/mcp-tools` and are thin GETs against
+the Floaters API, so no MCP client can ever write; they reuse the same
+cashflow/forecast/time computation the web app sees. Two ways to reach them:
+
+- **Remote (claude.ai, Claude desktop, any Streamable HTTP client)**: the API
+  serves the tools at `https://floaters.flux.am/mcp/<MCP_SECRET>`. See
+  "Use from claude.ai" below.
+- **Local stdio (`@floaters/mcp`, this package)**: for OpenClaw and other
+  clients that spawn a process.
 
 ## Tools
 
@@ -17,7 +23,35 @@ reuses the same cashflow/forecast computation the web app sees.
 | `get_time_tracking` | Hours from Toggl by client per month (same window as `get_cashflow`), billable split, per-project breakdown, and `invoicedExVat` for clients linked to the income pipeline (effective rate = invoiced / hours). Also today's and this week's hours and the running entry. Params: `monthsBack`, `monthsForward`. |
 | `list_time_entries` | Individual Toggl entries over a date range (default last 7 days, max 92), newest first. Params: `from`, `to`. |
 
-## Configuration
+## Use from claude.ai
+
+The API exposes the same tools as a stateless Streamable HTTP MCP endpoint at
+`/mcp/<MCP_SECRET>`. The secret in the path is the whole access control, so it
+is a long random value set on the API (Railway env var `MCP_SECRET`, generate
+with `openssl rand -hex 24`), separate from `CONNECT_SECRET`.
+
+In claude.ai: Settings → Connectors → **Add custom connector**, name it
+`Floaters`, and paste the URL:
+
+```
+https://floaters.flux.am/mcp/<MCP_SECRET>
+```
+
+No OAuth or extra credentials are needed. Once added, enable it in a chat and
+ask things like "what's my cash position", "which month do I dip below zero",
+or "how many hours did I do for Propellernet last month and what did I invoice
+them". Rotating the secret is one env var change on Railway; the old URL then
+404s.
+
+Quick check from a shell:
+
+```bash
+curl -sS -X POST "https://floaters.flux.am/mcp/<MCP_SECRET>" \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+## Configuration (stdio server)
 
 Two env vars:
 
