@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { triggerSync, getPipeline } from '@/lib/api';
-import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse } from '@/lib/types';
+import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox } from 'lucide-react';
@@ -10,6 +10,8 @@ import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart from '@/components/AlignedChart';
 import ForecastViewToggle from '@/components/ForecastViewToggle';
+import TimePanel from '@/components/TimePanel';
+import { formatHours, monthIndexer } from '@/lib/time';
 import { useForecastView } from '@/hooks/use-forecast-view';
 
 const SECONDARY_STROKE_COMMITTED = 'hsl(38 92% 50%)';
@@ -49,9 +51,11 @@ interface Props {
   data: CashflowData;
   // Raw override amounts keyed accountCode|month (see CashflowPage)
   overrideAmounts?: Map<string, number>;
+  // Hours from Toggl (see CashflowPage); absent hides the block.
+  time?: TimeTrackingResponse;
 }
 
-export default function CashflowMobile({ data, overrideAmounts = new Map() }: Props) {
+export default function CashflowMobile({ data, overrideAmounts = new Map(), time }: Props) {
   const queryClient = useQueryClient();
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
 
@@ -75,6 +79,8 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
   const [costsOpen, setCostsOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
+  const [hoursOpen, setHoursOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
 
   const { data: pipeline } = useQuery<PipelineResponse>({
     queryKey: ['pipeline'],
@@ -88,6 +94,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
     mutationFn: triggerSync,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+      queryClient.invalidateQueries({ queryKey: ['time'] });
       toast.success('Sync complete');
     },
     onError: () => toast.error('Sync failed'),
@@ -273,10 +280,52 @@ export default function CashflowMobile({ data, overrideAmounts = new Map() }: Pr
         {/* Net + Ending */}
         <SummaryRowMobile label={projected ? 'Net cash movement (projected)' : 'Net cash movement'} value={primaryNet[activeIdx]} bold colored />
         <SummaryRowMobile label="Ending balance" value={primaryClosing[activeIdx]} />
+
+        {time?.configured && (
+          <HoursMobile time={time} month={month} open={hoursOpen} onToggle={() => setHoursOpen(!hoursOpen)} onOpenPanel={() => setTimeOpen(true)} />
+        )}
       </div>
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
+      <TimePanel open={timeOpen} onOpenChange={setTimeOpen} time={time} />
+    </div>
+  );
+}
+
+// Hours for the active month: total in the header, clients beneath when open.
+function HoursMobile({ time, month, open, onToggle, onOpenPanel }: {
+  time: TimeTrackingResponse; month: string; open: boolean; onToggle: () => void; onOpenPanel: () => void;
+}) {
+  const i = monthIndexer(time)(month);
+  const total = i < 0 ? 0 : time.totals.hours[i] ?? 0;
+  const billable = i < 0 ? 0 : time.totals.billableHours[i] ?? 0;
+  const clients = i < 0 ? [] : time.clients.filter(c => (c.hours[i] ?? 0) > 0);
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between px-4 py-2 border-y border-border bg-card border-l-2 border-l-section-hours" onClick={onToggle}>
+        <div className="flex items-center gap-1 text-xs font-semibold">
+          {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <span>⏱ Hours</span>
+          {time.running && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />}
+          <button className="ml-1 p-0.5 rounded hover:bg-accent/50" onClick={e => { e.stopPropagation(); onOpenPanel(); }} title="Time tracking">
+            <Settings className="h-3 w-3" />
+          </button>
+        </div>
+        <span className="text-xs font-semibold tabular-nums">
+          {formatHours(total) || '0h'}
+          {billable > 0 && <span className="ml-1 font-normal text-muted-foreground">({formatHours(billable)} billable)</span>}
+        </span>
+      </div>
+      {open && clients.map(c => (
+        <div key={c.togglClientId ?? 'none'} className="flex items-center justify-between px-4 py-1.5 pl-7 border-b border-border text-xs">
+          <span className={`truncate ${c.togglClientId === null ? 'text-muted-foreground italic' : ''}`}>{c.clientName}</span>
+          <span className="tabular-nums">{formatHours(c.hours[i])}</span>
+        </div>
+      ))}
+      {open && clients.length === 0 && (
+        <p className="px-4 py-1.5 pl-7 text-xs text-muted-foreground italic">No hours this month.</p>
+      )}
     </div>
   );
 }

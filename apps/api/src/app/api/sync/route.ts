@@ -1,5 +1,7 @@
 import { requireConnection, json, handleError } from "@/lib/api-helpers";
 import { runSync, healInvoiceStatuses, backfillInvoiceTax } from "@/lib/xero/sync";
+import { isTogglConfigured } from "@/lib/toggl/client";
+import { runTogglSync, type TogglSyncResult } from "@/lib/toggl/sync";
 import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
@@ -95,7 +97,21 @@ export async function POST(request: NextRequest) {
     }
 
     const records = await runSync(connectionId, isInitial);
-    return json({ ok: true, recordsSynced: records, healed, taxBackfilled });
+
+    // Time tracking rides the same button. A Toggl failure never fails the
+    // Xero sync that already completed: it is reported alongside instead.
+    let toggl: { ok: true; result: TogglSyncResult } | { ok: false; error: string } | null = null;
+    if (isTogglConfigured()) {
+      try {
+        toggl = { ok: true, result: await runTogglSync(connectionId, { full: flags.full === true }) };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        console.error("Toggl sync failed:", message);
+        toggl = { ok: false, error: message };
+      }
+    }
+
+    return json({ ok: true, recordsSynced: records, healed, taxBackfilled, toggl });
   } catch (err) {
     return handleError(err);
   }
