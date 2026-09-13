@@ -97,6 +97,28 @@ describe("resolveClientLink", () => {
   it("leaves an unknown client unlinked", () => {
     expect(resolveClientLink({ toggl_id: 4, name: "Nobody", client_key: null }, options)).toEqual({ clientKey: null, linkSource: null });
   });
+
+  const legal = [
+    { clientKey: "contact:pnet", clientName: "Propellernet Ltd" },
+    { clientKey: "contact:edifai", clientName: "Coteam Ltd, trading as Edifai" },
+    { clientKey: "contact:elev8", clientName: "Elev-8 Performance Improvement Ltd" },
+    { clientKey: "contact:ai-1", clientName: "AI Summit Ltd" },
+    { clientKey: "contact:ai-2", clientName: "Summit Partners LLP" },
+    { clientKey: "contact:westhill", clientName: "West Hill Community Centre" },
+  ];
+
+  it("links a short Toggl name that appears whole inside exactly one pipeline name", () => {
+    expect(resolveClientLink({ toggl_id: 5, name: "Propellernet", client_key: null }, legal).clientKey).toBe("contact:pnet");
+    expect(resolveClientLink({ toggl_id: 6, name: "edifai", client_key: null }, legal).clientKey).toBe("contact:edifai");
+    expect(resolveClientLink({ toggl_id: 7, name: "Elev-8", client_key: null }, legal)).toEqual({ clientKey: "contact:elev8", linkSource: "auto" });
+  });
+
+  it("never links on a partial word, a too-short name, or an ambiguous containment", () => {
+    expect(resolveClientLink({ toggl_id: 8, name: "Hill", client_key: null }, legal).clientKey).toBe("contact:westhill");
+    expect(resolveClientLink({ toggl_id: 9, name: "Propeller", client_key: null }, legal).clientKey).toBeNull(); // partial word
+    expect(resolveClientLink({ toggl_id: 10, name: "AI", client_key: null }, legal).clientKey).toBeNull(); // too short
+    expect(resolveClientLink({ toggl_id: 11, name: "Summit", client_key: null }, legal).clientKey).toBeNull(); // two candidates
+  });
 });
 
 describe("rollupTime", () => {

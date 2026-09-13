@@ -35,7 +35,7 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts, v
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[400px] sm:w-[440px] p-0 flex flex-col">
+      <SheetContent className="w-full sm:w-[440px] p-0 flex flex-col">
         <SheetHeader className="px-6 pt-6 pb-2">
           <SheetTitle className="text-sm font-semibold">Account Management</SheetTitle>
         </SheetHeader>

@@ -4,7 +4,7 @@ import { triggerSync, getPipeline } from '@/lib/api';
 import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox, Clock } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import EditableCell from '@/components/EditableCell';
@@ -309,7 +309,7 @@ function HoursMobile({ time, month, open, onToggle, onOpenPanel }: {
           <span>⏱ Hours</span>
           {time.running && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />}
           <button className="ml-1 p-0.5 rounded hover:bg-accent/50" onClick={e => { e.stopPropagation(); onOpenPanel(); }} title="Time tracking">
-            <Settings className="h-3 w-3" />
+            <Clock className="h-3 w-3" />
           </button>
         </div>
         <span className="text-xs font-semibold tabular-nums">

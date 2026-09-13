@@ -82,10 +82,26 @@ export function isRunning(entry: Pick<EntryRow, "stop" | "duration_seconds" | "d
 
 const normalise = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+// Shortest Toggl client name allowed to match by containment: anything
+// shorter would link on noise ("AI" is inside half the contact list).
+const MIN_CONTAINMENT_LENGTH = 4;
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** True when `needle` appears in `haystack` as whole words (both normalised). */
+export function containsWords(haystack: string, needle: string): boolean {
+  if (needle.length < MIN_CONTAINMENT_LENGTH) return false;
+  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(needle)}($|[^a-z0-9])`).test(haystack);
+}
+
 /**
  * Resolve a Toggl client to a pipeline client key: an explicit link wins, else
- * a case-insensitive name match against the known pipeline clients (contact
- * name or projection label), else unlinked.
+ * a name match against the known pipeline clients (contact name or projection
+ * label), else unlinked. Names match exactly (normalised) first; failing that,
+ * a Toggl name that appears whole inside exactly one pipeline name links to it
+ * ("Propellernet" -> "Propellernet Ltd", "Edifai" -> "Coteam Ltd, trading as
+ * Edifai"). An ambiguous containment (two candidates) never links: Jim sets
+ * that one by hand.
  */
 export function resolveClientLink(
   togglClient: ClientRow,
@@ -100,6 +116,8 @@ export function resolveClientLink(
   const labelKey = clientKey(null, togglClient.name);
   const byKey = linkOptions.find((o) => o.clientKey === labelKey);
   if (byKey) return { clientKey: byKey.clientKey, linkSource: "auto" };
+  const containing = linkOptions.filter((o) => containsWords(normalise(o.clientName), wanted));
+  if (containing.length === 1) return { clientKey: containing[0].clientKey, linkSource: "auto" };
   return { clientKey: null, linkSource: null };
 }
 
