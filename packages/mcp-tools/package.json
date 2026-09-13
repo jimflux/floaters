@@ -1,0 +1,16 @@
+{
+  "name": "@floaters/mcp-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Floaters MCP tool definitions, shared by the stdio server (OpenClaw) and the API's remote endpoint (claude.ai)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25 || ^4.0"
+  }
+}

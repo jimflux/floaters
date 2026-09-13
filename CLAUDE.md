@@ -13,8 +13,9 @@ Originally two repos (a Next.js API + a Lovable-built frontend); now a single np
 ```
 apps/api      Next.js API (App Router, API routes only) — Xero sync + cashflow engine
 apps/web      Vite + React 19 + shadcn/ui frontend (was the Lovable app)
-apps/mcp      Read-only MCP server exposing the cashflow data to OpenClaw
+apps/mcp      Read-only stdio MCP server exposing the cashflow data to OpenClaw
 packages/types Shared API contract (the cashflow response shape) imported by all apps
+packages/mcp-tools MCP tool definitions shared by apps/mcp and the API's remote /mcp endpoint
 ```
 
 Run from the root:
@@ -67,9 +68,12 @@ Key tables: `xero_connections`, `xero_invoices` (carries local columns `expected
 
 React Query for data; the cashflow query is `['cashflow']`, hours are `['time']` (an "Hours" section under the grid plus `TimePanel` for sync and client links). Editable projection cells (`src/components/EditableCell.tsx`) use the optimistic-mutation pattern (patch in `onMutate`, roll back in `onError`, invalidate in `onSettled`). API base/key come from `VITE_API_URL` / `VITE_API_KEY`.
 
-## MCP server (`apps/mcp`)
+## MCP (`packages/mcp-tools`, `apps/mcp`, `/mcp/<secret>`)
 
-Read-only. Tools (`get_cashflow`, `get_income_pipeline`, `get_connection`, `get_forecast`, `list_transactions`, `get_time_tracking`, `list_time_entries`) are GETs against the API, so the server can't mutate anything. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. See `apps/mcp/README.md` for the OpenClaw setup.
+Read-only. The tool definitions (`get_cashflow`, `get_income_pipeline`, `get_connection`, `get_forecast`, `list_transactions`, `get_time_tracking`, `list_time_entries`) live in `packages/mcp-tools` (`registerFloatersTools(server, apiGet)`) and are GETs against the API, so no MCP client can mutate anything. Two transports share them:
+- `apps/mcp`: stdio server for OpenClaw. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. esbuild bundles the shared package (only the SDK and zod stay external).
+- `apps/api/src/app/mcp/[secret]/route.ts`: remote Streamable HTTP endpoint (stateless, JSON responses) for claude.ai custom connectors at `https://floaters.flux.am/mcp/<MCP_SECRET>`. The path secret is the whole access control (claude.ai sends no credentials), so `MCP_SECRET` is its own value, never `CONNECT_SECRET` (which ships in the web bundle); unset means 404 everywhere. Tool calls GET the API over loopback with `CONNECT_SECRET` (`src/lib/mcp.ts`).
+See `apps/mcp/README.md` for both setups.
 
 ## Deployment
 
@@ -77,6 +81,6 @@ API → Railway (always-on; `railway.json` at the root). See `docs/DEPLOY-RAILWA
 
 ## Environment Variables
 
-API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FRONTEND_URL`, `TOGGL_API_TOKEN` (optional; enables time tracking), `TOGGL_WORKSPACE_ID` / `TOGGL_TIMEZONE` (optional).
+API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FRONTEND_URL`, `TOGGL_API_TOKEN` (optional; enables time tracking), `TOGGL_WORKSPACE_ID` / `TOGGL_TIMEZONE` (optional), `MCP_SECRET` (optional; enables the remote MCP endpoint).
 Web (`apps/web/.env`): `VITE_API_URL`, `VITE_API_KEY`.
 MCP: `FLOATERS_API_URL`, `FLOATERS_API_KEY`.
