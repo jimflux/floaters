@@ -5,6 +5,10 @@ import Bottleneck from "bottleneck";
 // configuration (TOGGL_API_TOKEN), never stored in the database: with no
 // token, time tracking simply reports itself unconfigured.
 export const TOGGL_API_BASE = "https://api.track.toggl.com/api/v9";
+// Reports API: the only way to read entries older than the v9 endpoint's
+// three-month floor. Separate quota (roughly 30 requests an hour), so the
+// sync keeps its calls to it few and large.
+export const TOGGL_REPORTS_BASE = "https://api.track.toggl.com/reports/api/v3";
 
 // Toggl asks for roughly one request per second per token.
 const limiter = new Bottleneck({ maxConcurrent: 1, minTime: 1100 });
@@ -29,30 +33,53 @@ export function togglAuthHeader(token: string): string {
   return `Basic ${Buffer.from(`${token}:api_token`).toString("base64")}`;
 }
 
-export async function togglRequest<T>(
+export interface TogglRequestOptions {
+  method?: "GET" | "POST";
+  body?: unknown;
+  base?: string; // defaults to the v9 API
+}
+
+export interface TogglResponse<T> {
+  data: T;
+  headers: Headers;
+}
+
+/** Request returning the parsed body plus response headers (Reports API paginates by header). */
+export async function togglRequestRaw<T>(
   path: string,
-  params?: Record<string, string | number | boolean | undefined>
-): Promise<T> {
+  params?: Record<string, string | number | boolean | undefined>,
+  options: TogglRequestOptions = {}
+): Promise<TogglResponse<T>> {
   const token = togglToken();
   if (!token) throw new Error("TOGGL_API_TOKEN is not set");
 
-  const url = new URL(`${TOGGL_API_BASE}${path}`);
+  const url = new URL(`${options.base ?? TOGGL_API_BASE}${path}`);
   for (const [key, value] of Object.entries(params ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
 
   return limiter.schedule(async () => {
     const response = await fetch(url.toString(), {
+      method: options.method ?? "GET",
       headers: {
         Authorization: togglAuthHeader(token),
         "Content-Type": "application/json",
         Accept: "application/json",
       },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(`Toggl API error (${response.status}) on ${path}: ${text}`.trim());
     }
-    return (await response.json()) as T;
+    return { data: (await response.json()) as T, headers: response.headers };
   });
+}
+
+export async function togglRequest<T>(
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  options: TogglRequestOptions = {}
+): Promise<T> {
+  return (await togglRequestRaw<T>(path, params, options)).data;
 }

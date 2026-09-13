@@ -1,8 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import { chunkedUpsert, HISTORY_MONTHS } from "@/lib/xero/sync";
-import { togglRequest, isTogglConfigured } from "./client";
-import type { TogglMe, TogglClient, TogglProject, TogglTimeEntry } from "@/types/toggl";
-import { addMonths, startOfMonth, subMonths, subHours, format } from "date-fns";
+import { togglRequest, togglRequestRaw, isTogglConfigured, TOGGL_REPORTS_BASE } from "./client";
+import type { TogglMe, TogglClient, TogglProject, TogglTimeEntry, TogglReportRow } from "@/types/toggl";
+import { addDays, addMonths, startOfMonth, subMonths, subHours, format, max as maxDate } from "date-fns";
 
 // Toggl sync: clients, projects and time entries into the toggl_* tables.
 // Initial sync walks HISTORY_MONTHS month by month (the same depth as the cash
@@ -13,6 +13,13 @@ import { addMonths, startOfMonth, subMonths, subHours, format } from "date-fns";
 // this we fall back to a full re-walk rather than silently missing entries.
 const SINCE_MAX_DAYS = 60;
 const PROJECTS_PAGE = 200;
+// The v9 time entries endpoint rejects start_date earlier than three months
+// ago ("start_date must not be earlier than <today - 3 months>", seen live).
+// History before that comes from the Reports API instead.
+const V9_FLOOR_MONTHS = 3;
+// Reports API rows per page. Its quota is small (~30 requests/hour), so the
+// older-history pull is one range with as few pages as possible.
+const REPORT_PAGE_SIZE = 1000;
 
 export interface TogglSyncResult {
   clients: number;
@@ -116,21 +123,94 @@ export async function fetchProjects(workspaceId: number): Promise<TogglProject[]
   return all;
 }
 
-/** The [start, end) month windows an initial sync walks, oldest first. */
+/** Earliest start_date the v9 endpoint accepts (a day inside the limit for safety). */
+export function v9Floor(now: Date): Date {
+  return addDays(subMonths(now, V9_FLOOR_MONTHS), 1);
+}
+
+/**
+ * The [start, end) month windows an initial sync walks through the v9
+ * endpoint, oldest first, clamped to its floor: earlier history is the
+ * Reports API's job (see historyReportRange).
+ */
 export function historyWindows(now: Date, months = HISTORY_MONTHS): Array<{ start: string; end: string }> {
   const windows: Array<{ start: string; end: string }> = [];
+  const floor = v9Floor(now);
   let cursor = startOfMonth(subMonths(now, months));
   const stop = startOfMonth(addMonths(now, 1));
   while (cursor < stop) {
     const next = addMonths(cursor, 1);
-    windows.push({ start: format(cursor, "yyyy-MM-dd"), end: format(next, "yyyy-MM-dd") });
+    if (next > floor) {
+      windows.push({ start: format(maxDate([cursor, floor]), "yyyy-MM-dd"), end: format(next, "yyyy-MM-dd") });
+    }
     cursor = next;
   }
   return windows;
 }
 
-export async function fetchEntriesFull(now: Date): Promise<TogglTimeEntry[]> {
+/** The [start, end] date range (inclusive, Reports API style) older than the v9 floor. */
+export function historyReportRange(now: Date, months = HISTORY_MONTHS): { start: string; end: string } | null {
+  const start = startOfMonth(subMonths(now, months));
+  const end = addDays(v9Floor(now), -1);
+  if (end < start) return null;
+  return { start: format(start, "yyyy-MM-dd"), end: format(end, "yyyy-MM-dd") };
+}
+
+/** Flatten a Reports API row into v9-shaped entries (tag names are not available there). */
+export function reportRowToEntries(row: TogglReportRow, workspaceId: number): TogglTimeEntry[] {
+  return row.time_entries.map((e) => ({
+    id: e.id,
+    workspace_id: workspaceId,
+    project_id: row.project_id ?? null,
+    task_id: row.task_id ?? null,
+    description: row.description ?? null,
+    start: e.start,
+    stop: e.stop,
+    duration: e.seconds,
+    billable: row.billable === true,
+    tags: null,
+    tag_ids: row.tag_ids ?? null,
+    at: e.at,
+    server_deleted_at: null,
+  }));
+}
+
+export async function fetchEntriesReport(
+  workspaceId: number,
+  range: { start: string; end: string }
+): Promise<TogglTimeEntry[]> {
+  const out: TogglTimeEntry[] = [];
+  let firstRow: number | undefined;
+  while (true) {
+    const { data, headers } = await togglRequestRaw<TogglReportRow[]>(
+      `/workspace/${workspaceId}/search/time_entries`,
+      undefined,
+      {
+        method: "POST",
+        base: TOGGL_REPORTS_BASE,
+        body: {
+          start_date: range.start,
+          end_date: range.end,
+          page_size: REPORT_PAGE_SIZE,
+          ...(firstRow !== undefined ? { first_row_number: firstRow } : {}),
+        },
+      }
+    );
+    for (const row of items<TogglReportRow>(data)) out.push(...reportRowToEntries(row, workspaceId));
+    const next = Number(headers.get("x-next-row-number"));
+    if (!Number.isFinite(next) || next <= 0 || (firstRow !== undefined && next <= firstRow)) break;
+    firstRow = next;
+  }
+  return out;
+}
+
+export async function fetchEntriesFull(now: Date, workspaceId: number): Promise<TogglTimeEntry[]> {
   const seen = new Map<number, TogglTimeEntry>();
+  const older = historyReportRange(now);
+  if (older) {
+    for (const e of await fetchEntriesReport(workspaceId, older)) seen.set(e.id, e);
+  }
+  // v9 last so its richer rows (meta names, tag names, deletions) win on overlap.
   for (const w of historyWindows(now)) {
     const batch = items<TogglTimeEntry>(
       await togglRequest("/me/time_entries", { start_date: w.start, end_date: w.end, meta: true })
@@ -171,7 +251,7 @@ export async function runTogglSync(connectionId: string, opts: { full?: boolean 
     const clients = await fetchClients(workspaceId);
     const projects = await fetchProjects(workspaceId);
     // Overlap the cursor by an hour so a clock skew never drops an edit.
-    const entries = full ? await fetchEntriesFull(now) : await fetchEntriesSince(subHours(lastSynced!, 1));
+    const entries = full ? await fetchEntriesFull(now, workspaceId) : await fetchEntriesSince(subHours(lastSynced!, 1));
 
     if (clients.length) {
       await chunkedUpsert("toggl_clients", clients.map((c) => mapClient(connectionId, c)), "connection_id,toggl_id");

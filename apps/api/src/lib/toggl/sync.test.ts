@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const togglRequestMock = vi.hoisted(() =>
-  vi.fn<(path: string, params?: Record<string, unknown>) => Promise<unknown>>()
+  vi.fn<(path: string, params?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>>()
+);
+// Reports API calls go through the raw client; each mock call resolves the
+// body plus a headers object carrying the next-row cursor.
+const togglRequestRawMock = vi.hoisted(() =>
+  vi.fn<(path: string, params?: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{ data: unknown; headers: Headers }>>()
 );
 const upsertMock = vi.hoisted(() => vi.fn(async (_table: string, _rows: unknown) => ({ error: null })));
 const state = vi.hoisted(() => ({
@@ -11,7 +16,9 @@ const state = vi.hoisted(() => ({
 
 vi.mock("./client", () => ({
   togglRequest: togglRequestMock,
+  togglRequestRaw: togglRequestRawMock,
   isTogglConfigured: () => true,
+  TOGGL_REPORTS_BASE: "https://reports.test",
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -32,8 +39,19 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 
-import { mapTimeEntry, mapProject, mapClient, historyWindows, runTogglSync, fetchProjects } from "./sync";
-import type { TogglTimeEntry } from "@/types/toggl";
+import {
+  mapTimeEntry,
+  mapProject,
+  mapClient,
+  historyWindows,
+  historyReportRange,
+  v9Floor,
+  reportRowToEntries,
+  fetchEntriesReport,
+  runTogglSync,
+  fetchProjects,
+} from "./sync";
+import type { TogglTimeEntry, TogglReportRow } from "@/types/toggl";
 
 describe("mapTimeEntry", () => {
   const base: TogglTimeEntry = {
@@ -100,15 +118,67 @@ describe("mapProject / mapClient", () => {
   });
 });
 
-describe("historyWindows", () => {
-  it("walks month by month from HISTORY_MONTHS back through the current month", () => {
-    const windows = historyWindows(new Date("2026-09-13T10:00:00Z"), 3);
-    expect(windows).toEqual([
-      { start: "2026-06-01", end: "2026-07-01" },
+describe("history windows and the v9 floor", () => {
+  const now = new Date("2026-09-13T10:00:00Z");
+
+  it("puts the v9 floor a day inside Toggl's three-month limit", () => {
+    // Toggl rejected 2026-06-12 with "start_date must not be earlier than 2026-06-13".
+    expect(v9Floor(now).toISOString().slice(0, 10)).toBe("2026-06-14");
+  });
+
+  it("walks v9 month by month from the floor through the current month", () => {
+    expect(historyWindows(now, 12)).toEqual([
+      { start: "2026-06-14", end: "2026-07-01" },
       { start: "2026-07-01", end: "2026-08-01" },
       { start: "2026-08-01", end: "2026-09-01" },
       { start: "2026-09-01", end: "2026-10-01" },
     ]);
+  });
+
+  it("hands everything before the floor to the Reports API as one inclusive range", () => {
+    expect(historyReportRange(now, 12)).toEqual({ start: "2025-09-01", end: "2026-06-13" });
+  });
+
+  it("needs no report range when the history depth is inside the floor", () => {
+    expect(historyReportRange(now, 2)).toBeNull();
+    expect(historyWindows(now, 2)).toEqual([
+      { start: "2026-07-01", end: "2026-08-01" },
+      { start: "2026-08-01", end: "2026-09-01" },
+      { start: "2026-09-01", end: "2026-10-01" },
+    ]);
+  });
+});
+
+describe("Reports API history", () => {
+  const row: TogglReportRow = {
+    project_id: 10,
+    billable: true,
+    description: "Deck",
+    tag_ids: [5],
+    time_entries: [
+      { id: 1, seconds: 2542, start: "2026-01-08T02:00:00+00:00", stop: "2026-01-08T02:42:22+00:00", at: "2026-01-08T02:42:23+00:00" },
+      { id: 2, seconds: 60, start: "2026-01-09T02:00:00+00:00", stop: "2026-01-09T02:01:00+00:00" },
+    ],
+  };
+
+  it("flattens a report row into v9-shaped entries", () => {
+    const entries = reportRowToEntries(row, 7);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ id: 1, workspace_id: 7, project_id: 10, description: "Deck", duration: 2542, billable: true, tags: null, tag_ids: [5], server_deleted_at: null });
+    expect(mapTimeEntry("conn", entries[0])).toMatchObject({ toggl_id: 1, duration_seconds: 2542, tags: [], billable: true });
+  });
+
+  it("pages with first_row_number until the next-row header stops advancing", async () => {
+    togglRequestRawMock.mockReset();
+    togglRequestRawMock
+      .mockResolvedValueOnce({ data: [row], headers: new Headers({ "x-next-row-number": "3" }) })
+      .mockResolvedValueOnce({ data: [{ ...row, time_entries: [{ id: 3, seconds: 10, start: "2026-02-01T00:00:00Z", stop: null }] }], headers: new Headers() });
+    const entries = await fetchEntriesReport(7, { start: "2025-09-01", end: "2026-06-13" });
+    expect(entries.map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(togglRequestRawMock).toHaveBeenCalledTimes(2);
+    expect(togglRequestRawMock.mock.calls[0][2]).toMatchObject({ method: "POST", base: "https://reports.test", body: { start_date: "2025-09-01", end_date: "2026-06-13", page_size: 1000 } });
+    expect((togglRequestRawMock.mock.calls[0][2] as { body: Record<string, unknown> }).body).not.toHaveProperty("first_row_number");
+    expect(togglRequestRawMock.mock.calls[1][2]).toMatchObject({ body: { first_row_number: 3 } });
   });
 });
 
@@ -128,6 +198,11 @@ describe("fetchProjects", () => {
 describe("runTogglSync", () => {
   beforeEach(() => {
     togglRequestMock.mockReset();
+    togglRequestRawMock.mockReset();
+    togglRequestRawMock.mockResolvedValue({
+      data: [{ project_id: 10, billable: false, description: "old", time_entries: [{ id: 900, seconds: 100, start: "2026-01-05T09:00:00Z", stop: "2026-01-05T09:01:40Z" }] }],
+      headers: new Headers(),
+    });
     upsertMock.mockClear();
     state.stateRow = null;
     state.stateUpserts = [];
@@ -147,17 +222,22 @@ describe("runTogglSync", () => {
     throw new Error(`unexpected ${path}`);
   }
 
-  it("does a full month-by-month walk on the first sync and resolves the workspace from /me", async () => {
+  it("does a full walk on the first sync: Reports API before the floor, v9 month by month after", async () => {
     togglRequestMock.mockImplementation(async (path: string, params?: Record<string, unknown>) => respond(path, params));
     const result = await runTogglSync("conn");
     expect(result.full).toBe(true);
     expect(result.workspaceId).toBe(7);
+    expect(togglRequestRawMock).toHaveBeenCalledTimes(1);
+    expect(togglRequestRawMock.mock.calls[0][0]).toBe("/workspace/7/search/time_entries");
+    expect(togglRequestRawMock.mock.calls[0][2]).toMatchObject({ body: { start_date: "2025-09-01", end_date: "2026-06-13" } });
     const entryCalls = togglRequestMock.mock.calls.filter((c) => c[0] === "/me/time_entries");
-    expect(entryCalls).toHaveLength(13); // 12 months back + the current month
-    expect(entryCalls[0][1]).toMatchObject({ start_date: "2025-09-01", end_date: "2025-10-01", meta: true });
-    expect(entryCalls[12][1]).toMatchObject({ start_date: "2026-09-01", end_date: "2026-10-01" });
+    expect(entryCalls).toHaveLength(4); // floor month (clamped) + three more through the current month
+    expect(entryCalls[0][1]).toMatchObject({ start_date: "2026-06-14", end_date: "2026-07-01", meta: true });
+    expect(entryCalls[3][1]).toMatchObject({ start_date: "2026-09-01", end_date: "2026-10-01" });
     const tables = upsertMock.mock.calls.map((c) => c[0]);
     expect(tables).toEqual(["toggl_clients", "toggl_projects", "toggl_time_entries"]);
+    const rows = upsertMock.mock.calls[2][1] as Array<{ toggl_id: number }>;
+    expect(rows.some((r) => r.toggl_id === 900)).toBe(true); // the report-sourced entry landed too
     const final = state.stateUpserts[state.stateUpserts.length - 1];
     expect(final).toMatchObject({ sync_status: "idle", workspace_id: 7, last_synced_at: "2026-09-13T10:00:00.000Z" });
   });
@@ -167,6 +247,7 @@ describe("runTogglSync", () => {
     togglRequestMock.mockImplementation(async (path: string, params?: Record<string, unknown>) => respond(path, params));
     const result = await runTogglSync("conn");
     expect(result.full).toBe(false);
+    expect(togglRequestRawMock).not.toHaveBeenCalled();
     expect(togglRequestMock.mock.calls.some((c) => c[0] === "/me")).toBe(false);
     const entryCalls = togglRequestMock.mock.calls.filter((c) => c[0] === "/me/time_entries");
     expect(entryCalls).toHaveLength(1);

@@ -52,3 +52,22 @@ export interface TogglTimeEntry {
   client_name?: string | null;
   client_id?: number | null;
 }
+
+// Reports API v3 search row: one row per (project, description, billable,
+// tags) group with the individual entries nested. Only fields the sync reads.
+export interface TogglReportRow {
+  user_id?: number;
+  project_id: number | null;
+  task_id?: number | null;
+  billable: boolean;
+  description: string | null;
+  tag_ids?: number[] | null;
+  row_number?: number;
+  time_entries: Array<{
+    id: number;
+    seconds: number;
+    start: string;
+    stop: string | null;
+    at?: string;
+  }>;
+}
