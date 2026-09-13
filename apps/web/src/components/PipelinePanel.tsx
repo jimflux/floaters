@@ -58,7 +58,7 @@ export default function PipelinePanel({ open, onOpenChange, pipeline }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[420px] sm:w-[480px] p-0 flex flex-col">
+      <SheetContent className="w-full sm:w-[480px] p-0 flex flex-col">
         <SheetHeader className="px-6 pt-6 pb-2">
           <SheetTitle className="text-sm font-semibold">Income Pipeline</SheetTitle>
         </SheetHeader>

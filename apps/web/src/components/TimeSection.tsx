@@ -28,6 +28,8 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
   const running = time?.running ?? null;
   const configured = time?.configured ?? false;
   const clients = time?.clients ?? [];
+  // Billable is a Toggl flag Jim may never set; an all-zero row is noise.
+  const anyBillable = (time?.totals.billableHours ?? []).some(h => h > 0);
 
   return (
     <>
@@ -78,6 +80,7 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
             <MessageRow months={months} text="No hours synced yet. Sync Now pulls the last 12 months from Toggl." />
           ) : (
             <>
+              {anyBillable && (
               <tr className="border-b border-border bg-row-summary" data-testid="layer-billable">
                 <td className="sticky left-0 z-10 bg-row-summary px-3 py-1 text-xs pl-7">
                   <span className="inline-flex items-center gap-1.5 text-muted-foreground">
@@ -94,6 +97,7 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
                   </td>
                 ))}
               </tr>
+              )}
               {clients.map((c, idx) => {
                 const isAlt = idx % 2 === 1;
                 return (

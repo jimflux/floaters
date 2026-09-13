@@ -83,6 +83,11 @@ describe("TimeSection", () => {
     expect(screen.queryByTestId("running-dot")).not.toBeInTheDocument();
   });
 
+  it("hides the billable subtotal when nothing is flagged billable", () => {
+    renderSection(fixture({ totals: { hours: [10, 4.75, 0], billableHours: [0, 0, 0] } }));
+    expect(screen.queryByTestId("layer-billable")).not.toBeInTheDocument();
+  });
+
   it("aligns by month key when the time window differs from the grid", () => {
     const at = monthIndexer(fixture({ months: ["2026-07", "2026-08", "2026-09"] }));
     expect(at("2026-08")).toBe(1);
