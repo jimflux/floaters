@@ -46,6 +46,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getProjectionOverrides: () => Promise.resolve({ overrides: [] }),
     getPipeline: () =>
       Promise.resolve({ currentMonth: "2026-06", projections: [], unreviewed: [], contacts: [] }),
+    getTimeTracking: () => Promise.resolve(undefined),
   };
 });
 

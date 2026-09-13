@@ -7,6 +7,18 @@ const state = vi.hoisted(() => ({
 
 const runSyncMock = vi.hoisted(() => vi.fn(async () => 5));
 const healMock = vi.hoisted(() => vi.fn(async () => 3));
+const togglState = vi.hoisted(() => ({ configured: false }));
+const runTogglSyncMock = vi.hoisted(() =>
+  vi.fn(async () => ({ clients: 1, projects: 2, entries: 3, workspaceId: 9, full: false }))
+);
+
+vi.mock("@/lib/toggl/client", () => ({
+  isTogglConfigured: () => togglState.configured,
+}));
+
+vi.mock("@/lib/toggl/sync", () => ({
+  runTogglSync: runTogglSyncMock,
+}));
 
 vi.mock("@/lib/api-helpers", () => ({
   requireConnection: async () => "conn",
@@ -48,7 +60,40 @@ describe("POST /api/sync", () => {
   beforeEach(() => {
     runSyncMock.mockClear();
     healMock.mockClear();
+    runTogglSyncMock.mockClear();
     state.lastSyncedAt = null;
+    togglState.configured = false;
+  });
+
+  it("skips Toggl when TOGGL_API_TOKEN is not configured", async () => {
+    const result = (await POST(request())) as unknown as { toggl: unknown };
+    expect(runTogglSyncMock).not.toHaveBeenCalled();
+    expect(result.toggl).toBeNull();
+  });
+
+  it("runs the Toggl sync after Xero when configured and reports it", async () => {
+    togglState.configured = true;
+    const result = (await POST(request({ full: true }))) as unknown as {
+      toggl: { ok: boolean; result: { entries: number } };
+    };
+    expect(runSyncMock).toHaveBeenCalledWith("conn", true);
+    expect(runTogglSyncMock).toHaveBeenCalledWith("conn", { full: true });
+    expect(result.toggl.ok).toBe(true);
+    expect(result.toggl.result.entries).toBe(3);
+  });
+
+  it("reports a Toggl failure without failing the Xero sync", async () => {
+    togglState.configured = true;
+    runTogglSyncMock.mockRejectedValueOnce(new Error("Toggl API error (403)"));
+    const result = (await POST(request())) as unknown as {
+      ok: boolean;
+      recordsSynced: number;
+      toggl: { ok: boolean; error: string };
+    };
+    expect(result.ok).toBe(true);
+    expect(result.recordsSynced).toBe(5);
+    expect(result.toggl.ok).toBe(false);
+    expect(result.toggl.error).toMatch(/403/);
   });
 
   it("runs a full sync when the connection has never synced", async () => {

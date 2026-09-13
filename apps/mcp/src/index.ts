@@ -164,6 +164,66 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "get_time_tracking",
+  {
+    title: "Get time tracking (hours by client)",
+    description:
+      "Hours worked, pulled from Toggl Track, rolled up by Toggl client per month over the same window as get_cashflow (future months are zero). Each client has total and billable hours, a per-project breakdown, and, when the Toggl client is linked to an income-pipeline client (clientKey matches get_cashflow's, linkSource 'manual' or 'auto' by name), invoicedExVat: the ex-VAT ACCREC invoice totals by issue month, so invoicedExVat[i] / hours[i] is that month's effective rate. Also returns todayHours, weekHours (Monday to date), the currently running entry if any, and sync state. Hours are context only: nothing here feeds the balance walks. configured is false when the API has no TOGGL_API_TOKEN.",
+    inputSchema: {
+      monthsBack: z
+        .number()
+        .int()
+        .min(0)
+        .max(12)
+        .optional()
+        .describe("Historical months to include (default 3, max 12, the synced history depth)."),
+      monthsForward: z
+        .number()
+        .int()
+        .min(1)
+        .max(24)
+        .optional()
+        .describe("Forward months to include (default 12, max 24); always zero hours, kept so months[] lines up with get_cashflow."),
+    },
+  },
+  async ({ monthsBack, monthsForward }) => {
+    try {
+      return ok(await apiGet("/api/time", { back: monthsBack, forward: monthsForward }));
+    } catch (err) {
+      return fail(err);
+    }
+  }
+);
+
+server.registerTool(
+  "list_time_entries",
+  {
+    title: "List time entries",
+    description:
+      "Individual Toggl time entries over an inclusive local-date range (default: the last 7 days, max 92 days), newest first, with project, client, linked pipeline clientKey, start/stop, duration, billable flag, tags, and whether the entry is still running. Totals for the range are included.",
+    inputSchema: {
+      from: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe("Start date YYYY-MM-DD (default 6 days before `to`)."),
+      to: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe("End date YYYY-MM-DD, inclusive (default today)."),
+    },
+  },
+  async ({ from, to }) => {
+    try {
+      return ok(await apiGet("/api/time/entries", { from, to }));
+    } catch (err) {
+      return fail(err);
+    }
+  }
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

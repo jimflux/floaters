@@ -13,6 +13,12 @@ export type {
   ProjectionOverride,
   ProjectionOverridesResponse,
   AccountGroup,
+  TimeTrackingResponse,
+  TimeClient,
+  TimeProject,
+  RunningTimeEntry,
+  TimeEntry,
+  TimeEntriesResponse,
 } from "@floaters/types";
 
 // GET /api/connection

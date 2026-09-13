@@ -13,4 +13,8 @@ export type {
   AccountGroup,
   ProjectionOverride,
   ProjectionOverridesResponse,
+  TimeTrackingResponse,
+  TimeClient,
+  TimeProject,
+  RunningTimeEntry,
 } from "@floaters/types";

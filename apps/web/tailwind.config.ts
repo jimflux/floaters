@@ -38,6 +38,7 @@ export default {
         "col-highlight": "hsl(var(--col-highlight))",
         "section-income": "hsl(var(--section-income))",
         "section-costs": "hsl(var(--section-costs))",
+        "section-hours": "hsl(var(--section-hours))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",

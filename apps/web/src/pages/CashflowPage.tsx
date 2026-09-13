@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCashflow, getProjectionOverrides, getPipeline, triggerSync, setProjectionOverride, CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY, type ProjectionOverrideEntry } from '@/lib/api';
-import type { CashflowData, CashflowAccount, CashflowAccountInfo, PipelineResponse } from '@/lib/types';
+import { getCashflow, getProjectionOverrides, getPipeline, getTimeTracking, triggerSync, setProjectionOverride, CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY, type ProjectionOverrideEntry } from '@/lib/api';
+import type { CashflowData, CashflowAccount, CashflowAccountInfo, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
 import IncomeSection, { unreviewedByClientMonth } from '@/components/IncomeSection';
 import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,8 @@ import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
 import CashflowMobile from '@/components/CashflowMobile';
 import ForecastViewToggle from '@/components/ForecastViewToggle';
+import TimeSection from '@/components/TimeSection';
+import TimePanel from '@/components/TimePanel';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useForecastView } from '@/hooks/use-forecast-view';
 
@@ -57,6 +59,9 @@ export default function CashflowPage() {
   // The pipeline panel (review tray + projections manager) opens from the
   // income header's + button and the header badge.
   const [pipelineOpen, setPipelineOpen] = useState(false);
+  // Hours (Toggl) section under the balance walk, and its panel.
+  const [hoursOpen, setHoursOpen] = useState(true);
+  const [timeOpen, setTimeOpen] = useState(false);
   const [view, setView] = useForecastView();
 
   const { data, isLoading, isError, error } = useQuery<CashflowData>({
@@ -80,6 +85,13 @@ export default function CashflowPage() {
   const { data: pipeline } = useQuery<PipelineResponse>({
     queryKey: ['pipeline'],
     queryFn: getPipeline,
+  });
+
+  // Hours from Toggl. Absent (unconfigured or failed) simply leaves the
+  // section explaining itself; the grid never depends on it.
+  const { data: time } = useQuery<TimeTrackingResponse>({
+    queryKey: ['time'],
+    queryFn: getTimeTracking,
   });
 
   // Raw override amounts, keyed accountCode|month, so editing a blended cell
@@ -111,6 +123,7 @@ export default function CashflowPage() {
     onSuccess: () => {
       setLastSync(new Date());
       queryClient.invalidateQueries({ queryKey: ['cashflow'] });
+      queryClient.invalidateQueries({ queryKey: ['time'] });
       toast.success('Sync complete');
     },
     onError: () => toast.error('Sync failed'),
@@ -125,7 +138,7 @@ export default function CashflowPage() {
   );
   if (!data) return null;
 
-  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} />;
+  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} time={time} />;
 
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
   const currentMonth = months[currentMonthIndex];
@@ -283,6 +296,17 @@ export default function CashflowPage() {
 
                 {/* Closing balance */}
                 <SummaryRow label="Ending balance" values={primaryClosing} months={months} currentMonthIndex={currentMonthIndex} />
+
+                {/* Spacer, then hours: context under the money, never part of it */}
+                <tr><td colSpan={months.length + 1} className="h-2 border-0 bg-background" /></tr>
+                <TimeSection
+                  time={time}
+                  months={months}
+                  currentMonthIndex={currentMonthIndex}
+                  open={hoursOpen}
+                  onToggle={() => setHoursOpen(!hoursOpen)}
+                  onOpenPanel={() => setTimeOpen(true)}
+                />
               </tbody>
             </table>
           </div>
@@ -291,6 +315,7 @@ export default function CashflowPage() {
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
+      <TimePanel open={timeOpen} onOpenChange={setTimeOpen} time={time} />
     </div>
   );
 }

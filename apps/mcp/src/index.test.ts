@@ -25,6 +25,16 @@ describe("MCP tool registration", () => {
     expect(src).toContain('apiGet("/api/pipeline")');
   });
 
+  it("registers the time tracking tools as GETs against /api/time", () => {
+    expect(src).toContain('"get_time_tracking"');
+    expect(src).toContain('"list_time_entries"');
+    expect(src).toContain('apiGet("/api/time"');
+    expect(src).toContain('apiGet("/api/time/entries"');
+    const time = src.slice(src.indexOf('"get_time_tracking"'), src.indexOf('"list_time_entries"'));
+    expect(time).toMatch(/invoicedExVat/);
+    expect(time).toMatch(/context only/);
+  });
+
   it("describes the committed/optimistic semantics on get_cashflow", () => {
     const desc = src.slice(src.indexOf('"get_cashflow"'), src.indexOf('"get_income_pipeline"'));
     expect(desc).toMatch(/committed/);

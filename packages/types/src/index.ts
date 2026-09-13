@@ -147,3 +147,85 @@ export interface ApiError {
   error: string;
   details?: string;
 }
+
+// --- Time tracking (Toggl) ---
+// Hours are context for the cashflow, never cash: nothing here feeds either
+// balance walk. Rolled up by Toggl client, with an optional link to the income
+// pipeline's clientKey so hours can sit next to what was invoiced.
+
+export interface TimeProject {
+  togglProjectId: number;
+  name: string;
+  billable: boolean;
+  rate: number | null; // Toggl hourly rate when set
+  currency: string | null;
+  color: string | null;
+  active: boolean;
+  hours: number[]; // one per month, same order as months[]
+  billableHours: number[];
+}
+
+export interface TimeClient {
+  togglClientId: number | null; // null = entries with no client (no project, or a project without one)
+  clientName: string;
+  clientKey: string | null; // linked pipeline client key (same key space as IncomeClient.clientKey)
+  linkSource: "manual" | "auto" | null; // explicit link, matched by name, or unlinked
+  hours: number[];
+  billableHours: number[];
+  // Σ ACCREC invoice totals ex VAT by issue month for the linked pipeline
+  // client; present only when linked. Divide by hours for an effective rate.
+  invoicedExVat?: number[];
+  projects: TimeProject[];
+}
+
+export interface RunningTimeEntry {
+  togglId: number;
+  description: string | null;
+  projectName: string | null;
+  clientName: string | null;
+  startedAt: string; // ISO
+  billable: boolean;
+}
+
+// GET /api/time
+export interface TimeTrackingResponse {
+  configured: boolean; // TOGGL_API_TOKEN present on the API
+  lastSyncedAt: string | null;
+  syncStatus: "idle" | "syncing" | "error";
+  syncError: string | null;
+  timeZone: string; // the zone entries are bucketed into days/months by
+  months: string[]; // same window as the cashflow grid; future months are zero
+  currentMonthIndex: number;
+  clients: TimeClient[];
+  totals: { hours: number[]; billableHours: number[] };
+  todayHours: number;
+  weekHours: number; // Monday-to-date in timeZone
+  running: RunningTimeEntry | null;
+  // Pipeline clients a Toggl client can be linked to (for the link picker).
+  linkOptions: Array<{ clientKey: string; clientName: string }>;
+}
+
+// GET /api/time/entries
+export interface TimeEntry {
+  togglId: number;
+  description: string | null;
+  projectName: string | null;
+  clientName: string | null;
+  clientKey: string | null;
+  start: string;
+  stop: string | null;
+  durationSeconds: number; // live for a running entry
+  hours: number;
+  billable: boolean;
+  tags: string[];
+  running: boolean;
+}
+
+export interface TimeEntriesResponse {
+  from: string; // yyyy-MM-dd inclusive
+  to: string; // yyyy-MM-dd inclusive
+  timeZone: string;
+  entries: TimeEntry[];
+  totalHours: number;
+  billableHours: number;
+}
