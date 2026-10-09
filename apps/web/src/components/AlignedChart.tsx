@@ -207,7 +207,7 @@ export default function AlignedChart({
 
         {/* Future line (dashed) */}
         {futPoints.length > 1 && (
-          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2.5} strokeDasharray="7 4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2.5} strokeDasharray="6 3" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Optimistic line (lighter, dashed) */}
