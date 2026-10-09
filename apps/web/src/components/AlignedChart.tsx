@@ -10,9 +10,15 @@ const PADDING_TOP = 20;
 const PADDING_BOTTOM = 30;
 const AXIS_LABEL_X = 4;
 
+// Series colours (Flux palette, checked on the white chart surface):
+// primary balance = aubergine ink (17.4:1), optimistic = iris (4.9:1),
+// spendable after VAT = coral (3.6:1). Each line also has its own dash
+// pattern and a legend entry, so identity never rests on colour alone.
 // The optimistic (projections land) series: visually lighter than committed.
-const OPTIMISTIC_STROKE = 'hsl(38 92% 50%)';
-const OPTIMISTIC_BAND_FILL = 'hsl(38 92% 50% / 0.08)';
+const OPTIMISTIC_STROKE = 'hsl(var(--iris))';
+const OPTIMISTIC_BAND_FILL = 'hsl(var(--iris) / 0.14)';
+// Below £0 is tinted coral so a dip into the red reads at a glance.
+const NEGATIVE_ZONE_FILL = 'hsl(var(--coral) / 0.10)';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -40,9 +46,9 @@ interface AlignedChartProps {
   adjustedStroke?: string;
 }
 
-// Spendable-after-VAT line: emerald, distinct from committed (foreground) and
-// optimistic (amber).
-const ADJUSTED_STROKE = 'hsl(160 84% 39%)';
+// Spendable-after-VAT line: coral, distinct from committed (aubergine) and
+// optimistic (iris), and dotted rather than dashed.
+const ADJUSTED_STROKE = 'hsl(var(--coral))';
 
 export default function AlignedChart({
   months,
@@ -175,13 +181,25 @@ export default function AlignedChart({
           ) : null
         ))}
 
-        {/* Grid lines (labels are HTML overlays below so they don't distort) */}
+        {/* Below-zero zone: only when the axis actually goes negative */}
+        {yMin < 0 && (
+          <rect data-testid="negative-zone" x={0} y={toY(0)} width={svgWidth} height={PADDING_TOP + plotHeight - toY(0)} fill={NEGATIVE_ZONE_FILL} />
+        )}
+
+        {/* Grid lines (labels are HTML overlays below so they don't distort).
+            The £0 line is drawn heavier: it is the line that matters. */}
         {yTicks.map((t, i) => (
-          <line key={i} x1={0} x2={svgWidth} y1={t.y} y2={t.y} stroke="hsl(var(--border))" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          <line
+            key={i}
+            x1={0} x2={svgWidth} y1={t.y} y2={t.y}
+            stroke={t.value === 0 ? 'hsl(var(--muted-foreground))' : 'hsl(var(--border))'}
+            strokeWidth={t.value === 0 ? 1.5 : 1}
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
 
         {/* Area fill */}
-        <path d={areaPath} fill="hsl(210 100% 60% / 0.08)" />
+        <path d={areaPath} fill="hsl(var(--aubergine) / 0.05)" />
 
         {/* Optimistic band (the visible risk gap) */}
         {hasDivergence && optFutPoints.length > 1 && (
@@ -221,7 +239,7 @@ export default function AlignedChart({
       {yTicks.map((t, i) => (
         <div
           key={`ylabel-${i}`}
-          className="absolute text-[10px] text-muted-foreground pointer-events-none tabular-nums"
+          className={`absolute text-[11px] pointer-events-none tabular-nums ${t.value === 0 ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}
           style={{ top: `${(t.y / CHART_HEIGHT) * 100}%`, left: AXIS_LABEL_X, transform: 'translateY(-50%)' }}
         >
           {formatGBP(t.value)}
@@ -229,45 +247,46 @@ export default function AlignedChart({
       ))}
 
       <div
-        className="absolute rounded-full bg-foreground pointer-events-none"
+        className="absolute rounded-full bg-aubergine pointer-events-none"
         style={{
-          width: 10, height: 10,
+          width: 12, height: 12,
           left: `${(points[currentMonthIndex].x / svgWidth) * 100}%`,
           top: `${(points[currentMonthIndex].y / CHART_HEIGHT) * 100}%`,
           transform: 'translate(-50%, -50%)',
-          boxShadow: '0 0 0 2px hsl(var(--background))',
+          boxShadow: '0 0 0 2px hsl(var(--card))',
         }}
       />
 
       {tooltip && (
         <div
-          className="absolute rounded-full bg-primary pointer-events-none"
+          className="absolute rounded-full bg-aubergine pointer-events-none"
           style={{
-            width: 8, height: 8,
+            width: 10, height: 10,
             left: `${(tooltip.x / svgWidth) * 100}%`,
             top: `${(tooltip.y / CHART_HEIGHT) * 100}%`,
             transform: 'translate(-50%, -50%)',
-            boxShadow: '0 0 0 2px hsl(var(--background))',
+            boxShadow: '0 0 0 2px hsl(var(--card)), 0 0 0 4px hsl(var(--sun))',
           }}
         />
       )}
 
-      {/* Legend: only when at least one extra line separates from committed */}
+      {/* Legend: only when at least one extra line separates from committed.
+          Pinned bottom-left so it stays in view when the grid scrolls. */}
       {(hasDivergence || hasAdjusted) && (
-        <div className="absolute top-1 right-2 flex items-center gap-3 text-[10px] text-muted-foreground bg-card/80 rounded px-1.5 py-0.5 pointer-events-none">
-          <span className="flex items-center gap-1">
-            <span className="inline-block w-3 border-t-2 border-foreground" />
+        <div className="absolute bottom-1 left-16 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-medium text-muted-foreground bg-card/90 rounded-full px-3 py-1 pointer-events-none">
+          <span className="flex items-center gap-1.5">
+            <LegendSwatch stroke="hsl(var(--aubergine))" />
             {primaryLabel}
           </span>
           {hasDivergence && (
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 border-t-2 border-dashed" style={{ borderColor: secondaryStroke }} />
+            <span className="flex items-center gap-1.5">
+              <LegendSwatch stroke={secondaryStroke} dash="3 2.5" />
               {secondaryLabel}
             </span>
           )}
           {hasAdjusted && (
-            <span className="flex items-center gap-1">
-              <span className="inline-block w-3 border-t-2 border-dotted" style={{ borderColor: adjustedStroke }} />
+            <span className="flex items-center gap-1.5">
+              <LegendSwatch stroke={adjustedStroke} dash="0.5 2.5" />
               {adjustedLabel}
             </span>
           )}
@@ -277,23 +296,32 @@ export default function AlignedChart({
       {/* Tooltip popup */}
       {tooltip && (
         <div
-          className="absolute pointer-events-none bg-card border border-border rounded-md px-2 py-1 text-xs shadow-sm z-20"
+          className="absolute pointer-events-none bg-aubergine text-cloud rounded-lg px-2.5 py-1.5 text-xs shadow-lg z-20 whitespace-nowrap"
           style={{
             left: `${(tooltip.x / svgWidth) * 100}%`,
             top: tooltip.y - (Math.abs(tooltip.optimistic - tooltip.value) > 0.005 ? 56 : 40),
             transform: 'translateX(-50%)',
           }}
         >
-          <div className="text-muted-foreground">{tooltip.month}</div>
+          <div className="text-muted-on-aubergine">{tooltip.month}</div>
           <div className="font-semibold tabular-nums">{formatGBP(tooltip.value)}</div>
           {Math.abs(tooltip.optimistic - tooltip.value) > 0.005 && (
-            <div className="tabular-nums" style={{ color: secondaryStroke }}>
+            <div className="tabular-nums text-muted-on-aubergine">
               {formatGBP(tooltip.optimistic)} · {secondaryLabel}
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+// Legend key drawn as a short line in the series' own dash pattern.
+function LegendSwatch({ stroke, dash }: { stroke: string; dash?: string }) {
+  return (
+    <svg width="16" height="4" aria-hidden="true" className="shrink-0">
+      <line x1="1" x2="15" y1="2" y2="2" stroke={stroke} strokeWidth={2.5} strokeLinecap="round" strokeDasharray={dash} />
+    </svg>
   );
 }
 

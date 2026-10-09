@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { clearCachedData } from '@/lib/cache';
 import { LOGOUT_PATH } from '@/lib/session';
-import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox, Clock } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox, Clock, Lock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
 import EditableCell from '@/components/EditableCell';
@@ -15,8 +15,13 @@ import ForecastViewToggle from '@/components/ForecastViewToggle';
 import TimePanel from '@/components/TimePanel';
 import { formatHours, monthIndexer } from '@/lib/time';
 import { useForecastView } from '@/hooks/use-forecast-view';
+import { moneyTone, zeroChip, LAYER_DOT } from '@/lib/brand';
+import FluxMark from '@/components/FluxMark';
 
-const SECONDARY_STROKE_COMMITTED = 'hsl(38 92% 50%)';
+const SECONDARY_STROKE_COMMITTED = 'hsl(var(--iris))';
+
+// Icon pill for the aubergine header.
+const HEADER_ICON_BUTTON = 'h-10 w-10 p-0 border-2 border-cloud/30 bg-transparent text-cloud hover:border-cloud hover:bg-transparent hover:text-cloud';
 const SECONDARY_STROKE_PROJECTED = 'hsl(var(--muted-foreground))';
 
 function formatGBP(n: number): string {
@@ -35,14 +40,6 @@ function formatMonthLong(yyyymm: string): string {
   const [y, m] = yyyymm.split('-');
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   return `${months[parseInt(m, 10) - 1]} ${y}`;
-}
-
-function getZeroColor(value: string | null): string {
-  if (!value) return 'text-green-600';
-  const lower = value.toLowerCase();
-  if (lower === 'this month' || lower.includes('1 month') || lower.includes('2 month')) return 'text-red-600';
-  if (lower.includes('3 month') || lower.includes('4 month') || lower.includes('5 month')) return 'text-amber-600';
-  return 'text-green-600';
 }
 
 function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
@@ -127,57 +124,63 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="flex items-center justify-between px-3 h-12 border-b border-border bg-card">
-        <span className="font-semibold text-sm tracking-tight">Floaters</span>
+      <header className="flex items-center justify-between px-4 h-16 bg-aubergine text-cloud">
+        <span className="flex items-center gap-2">
+          <FluxMark className="h-6 w-auto" />
+          <span className="font-display font-extrabold text-[24px] leading-none tracking-[-0.05em]">Floaters</span>
+        </span>
         <div className="flex items-center gap-1.5">
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0 relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
-            <Inbox className="h-3.5 w-3.5" />
+          <Button variant="outline" size="sm" className={`relative ${HEADER_ICON_BUTTON}`} onClick={() => setPipelineOpen(true)} title="Income pipeline" aria-label="Income pipeline">
+            <Inbox className="h-4 w-4" />
             {attentionCount(pipeline) > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-blue-600 text-white text-[9px] font-medium flex items-center justify-center">
+              <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-sun text-aubergine text-[11px] font-bold flex items-center justify-center ring-2 ring-aubergine">
                 {attentionCount(pipeline)}
               </span>
             )}
           </Button>
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} title="Sync">
-            <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+          <Button size="sm" className="h-10 w-10 p-0" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} title="Sync" aria-label="Sync">
+            <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
           </Button>
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setSettingsOpen(true)} title="Settings">
-            <Settings className="h-3.5 w-3.5" />
+          <Button variant="outline" size="sm" className={HEADER_ICON_BUTTON} onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings">
+            <Settings className="h-4 w-4" />
           </Button>
-          <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0" title="Sign out">
+          <Button asChild variant="ghost" size="sm" className="h-10 w-10 p-0 text-muted-on-aubergine hover:bg-white/10 hover:text-cloud" title="Sign out">
             <a href={LOGOUT_PATH} onClick={clearCachedData} aria-label="Sign out">
-              <LogOut className="h-3.5 w-3.5" />
+              <LogOut className="h-4 w-4" />
             </a>
           </Button>
         </div>
       </header>
 
       {/* Stat block */}
-      <div className="px-4 pt-4 pb-3 border-b border-border">
-        <div className="flex items-start justify-between">
+      <div className="mx-3 mt-3 rounded-card bg-card px-5 pt-5 pb-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs text-muted-foreground mb-0.5">Today's balance</p>
-            <p className="text-3xl font-bold tracking-tight tabular-nums">{formatGBP(currentBalance)}</p>
+            <p className="text-xs font-semibold text-muted-foreground mb-1">Today's balance</p>
+            <p className={`font-display text-[34px] font-extrabold leading-none tracking-[-0.04em] tabular-nums ${currentBalance < 0 ? 'money-neg rounded-md px-1 -mx-1' : ''}`}>{formatGBP(currentBalance)}</p>
           </div>
           <ForecastViewToggle view={view} onChange={setView} />
         </div>
-        <div className="mt-2 flex items-baseline gap-2">
-          <span className="text-xs text-muted-foreground">Drops below £0:</span>
-          <span className={`text-sm font-semibold ${getZeroColor(primaryFallsBelow)}`}>{primaryFallsBelow || 'Never'}</span>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">Drops below £0:</span>
+          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-sm font-bold ${zeroChip(primaryFallsBelow)}`}>
+            {primaryFallsBelow ? <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
+            {primaryFallsBelow || 'Never'}
+          </span>
         </div>
         {secondaryFallsBelow !== primaryFallsBelow && (
-          <p className="text-xs text-muted-foreground mt-0.5">{secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}</p>
+          <p className="text-xs text-muted-foreground mt-1.5">{secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}</p>
         )}
         {vatOwedNow != null && (
-          <div className="mt-1 flex items-baseline gap-2">
-            <span className="text-xs text-muted-foreground">VAT owed:</span>
-            <span className="text-sm font-semibold tabular-nums">{formatGBP(vatOwedNow)}</span>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xs font-semibold text-muted-foreground">VAT owed:</span>
+            <span className="text-sm font-bold tabular-nums">{formatGBP(vatOwedNow)}</span>
           </div>
         )}
       </div>
 
       {/* Chart */}
-      <div className="px-2 py-3 border-b border-border">
+      <div className="mx-3 mt-3 rounded-card bg-card px-2 py-3 overflow-hidden">
         <AlignedChart
           months={months}
           closingBalance={primaryClosing}
@@ -192,39 +195,41 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
       </div>
 
       {/* Month pager */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-card">
+      <div className="mx-3 mt-3 rounded-t-card flex items-center justify-between px-3 pt-3 pb-1.5 bg-card">
         <button
           onClick={goPrev}
           disabled={activeIdx === 0}
-          className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent/50 disabled:opacity-30"
+          aria-label="Previous month"
+          className="h-10 w-10 flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud disabled:opacity-30 disabled:hover:bg-cloud disabled:hover:text-foreground"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
         <div className="flex flex-col items-center">
-          <span className="text-sm font-semibold tracking-tight">{formatMonthLong(month)}</span>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wide">
+          <span className="font-display text-lg font-extrabold leading-tight tracking-[-0.02em]">{formatMonthLong(month)}</span>
+          <span className="text-[11px] font-semibold text-muted-foreground">
             {isCurrent ? 'Current' : isProjected ? 'Projected' : 'Actual'}
           </span>
         </div>
         <button
           onClick={goNext}
           disabled={activeIdx === months.length - 1}
-          className="h-8 w-8 flex items-center justify-center rounded hover:bg-accent/50 disabled:opacity-30"
+          aria-label="Next month"
+          className="h-10 w-10 flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud disabled:opacity-30 disabled:hover:bg-cloud disabled:hover:text-foreground"
         >
           <ChevR className="h-4 w-4" />
         </button>
       </div>
 
       {/* Dot indicator */}
-      <div className="flex items-center justify-center gap-1 py-2 border-b border-border bg-card overflow-x-auto">
+      <div className="mx-3 flex items-center justify-center gap-1 pt-1 pb-3 border-b border-border bg-card overflow-x-auto">
         {months.map((m, i) => (
           <button
             key={m}
             onClick={() => setActiveIdx(i)}
-            className={`h-1.5 rounded-full transition-all shrink-0 ${
-              i === activeIdx ? 'w-4 bg-foreground' :
-              i === currentMonthIndex ? 'w-1.5 bg-foreground/60' :
-              'w-1.5 bg-foreground/20'
+            className={`h-2 rounded-full transition-all shrink-0 ${
+              i === activeIdx ? 'w-5 bg-aubergine' :
+              i === currentMonthIndex ? 'w-2 bg-iris' :
+              'w-2 bg-aubergine/20'
             }`}
             aria-label={formatMonthShort(m)}
           />
@@ -232,7 +237,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
       </div>
 
       {/* Month detail list */}
-      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="pb-8">
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} className="mx-3 mb-8 rounded-b-card bg-card overflow-hidden pb-2">
         {/* Opening balance */}
         <SummaryRowMobile label="Opening balance" value={primaryOpening[activeIdx]} />
 
@@ -242,7 +247,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
           total={incomeMonthTotal(income, activeIdx)}
           open={incomeOpen}
           onToggle={() => setIncomeOpen(!incomeOpen)}
-          accent="border-l-section-income"
+          accent="shadow-[inset_4px_0_0_hsl(var(--section-income))]"
         />
         {incomeOpen && (
           <IncomeLayersMobile
@@ -254,13 +259,13 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
         )}
 
         {/* Costs */}
-        <div className="h-2 bg-background" />
+        <div className="h-3 bg-card" />
         <SectionHeaderMobile
           label="↘ Costs"
           total={sumMonthly(cashOut, activeIdx)}
           open={costsOpen}
           onToggle={() => setCostsOpen(!costsOpen)}
-          accent="border-l-section-costs"
+          accent="shadow-[inset_4px_0_0_hsl(var(--section-costs))]"
         />
         {costsOpen && cashOut.map((account, idx) => {
           // Projected view shows issued + projected VAT in the VAT row (matches
@@ -306,17 +311,17 @@ function HoursMobile({ time, month, open, onToggle, onOpenPanel }: {
   const billable = i < 0 ? 0 : time.totals.billableHours[i] ?? 0;
   const clients = i < 0 ? [] : time.clients.filter(c => (c.hours[i] ?? 0) > 0);
   return (
-    <div className="mt-2">
-      <div className="flex items-center justify-between px-4 py-2 border-y border-border bg-card border-l-2 border-l-section-hours" onClick={onToggle}>
-        <div className="flex items-center gap-1 text-xs font-semibold">
+    <div className="mt-3">
+      <div className="flex items-center justify-between px-4 py-3 border-y border-border bg-card shadow-[inset_4px_0_0_hsl(var(--section-hours))]" onClick={onToggle}>
+        <div className="flex items-center gap-1 font-display text-sm font-extrabold">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           <span>⏱ Hours</span>
-          {time.running && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />}
-          <button className="ml-1 p-0.5 rounded hover:bg-accent/50" onClick={e => { e.stopPropagation(); onOpenPanel(); }} title="Time tracking">
+          {time.running && <span className="ml-1.5 dot bg-mint animate-pulse" />}
+          <button className="ml-1 h-7 w-7 inline-flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud" onClick={e => { e.stopPropagation(); onOpenPanel(); }} title="Time tracking" aria-label="Time tracking">
             <Clock className="h-3 w-3" />
           </button>
         </div>
-        <span className="text-xs font-semibold tabular-nums">
+        <span className="text-sm font-bold tabular-nums">
           {formatHours(total) || '0h'}
           {billable > 0 && <span className="ml-1 font-normal text-muted-foreground">({formatHours(billable)} billable)</span>}
         </span>
@@ -342,9 +347,9 @@ function IncomeLayersMobile({ income, monthIndex, clientsOpen, onToggleClients }
   income: IncomeSection; monthIndex: number; clientsOpen: boolean; onToggleClients: () => void;
 }) {
   const layers: Array<{ label: string; dot: string; value: number; italic?: boolean }> = [
-    { label: 'Paid', dot: 'bg-green-500', value: income.totals.paid[monthIndex] },
-    { label: 'Invoiced', dot: 'bg-blue-500', value: income.totals.invoiced[monthIndex] },
-    { label: 'Projected', dot: 'bg-amber-400', value: income.totals.projected[monthIndex], italic: true },
+    { label: 'Paid', dot: LAYER_DOT.paid, value: income.totals.paid[monthIndex] },
+    { label: 'Invoiced', dot: LAYER_DOT.invoiced, value: income.totals.invoiced[monthIndex] },
+    { label: 'Projected', dot: LAYER_DOT.projected, value: income.totals.projected[monthIndex], italic: true },
   ];
   const clientsWithValue = income.clients.filter(c => c.monthly[monthIndex] !== 0);
   return (
@@ -352,10 +357,10 @@ function IncomeLayersMobile({ income, monthIndex, clientsOpen, onToggleClients }
       {layers.map(l => (
         <div key={l.label} data-testid={`m-layer-${l.label.toLowerCase()}`} className="flex items-center justify-between px-4 py-2 border-b border-border bg-row-summary">
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground pl-3">
-            <span className={`h-1.5 w-1.5 rounded-full ${l.dot}`} />
+            <span className={`dot ${l.dot}`} />
             {l.label}
           </span>
-          <span className={`text-sm tabular-nums text-muted-foreground ${l.italic ? 'italic' : ''} ${l.value < 0 ? 'text-destructive' : ''}`}>
+          <span className={`text-sm tabular-nums text-muted-foreground rounded px-1 ${l.italic ? 'italic' : ''} ${moneyTone(l.value)}`}>
             {formatGBP(l.value)}
           </span>
         </div>
@@ -373,9 +378,9 @@ function IncomeLayersMobile({ income, monthIndex, clientsOpen, onToggleClients }
         <div key={c.clientKey} className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${idx % 2 === 1 ? 'bg-row-alt' : ''}`}>
           <span className="text-xs pl-6 truncate pr-3 flex-1 inline-flex items-center gap-1.5">
             {c.clientName}
-            {c.overdue[monthIndex] && <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" title="Contains overdue invoice" />}
+            {c.overdue[monthIndex] && <span className="dot bg-coral" title="Contains overdue invoice" />}
           </span>
-          <span className={`text-sm tabular-nums ${c.monthly[monthIndex] < 0 ? 'text-destructive' : ''}`}>
+          <span className={`text-sm tabular-nums rounded px-1 ${moneyTone(c.monthly[monthIndex])}`}>
             {formatGBP(c.monthly[monthIndex])}
           </span>
         </div>
@@ -389,8 +394,8 @@ function SummaryRowMobile({ label, value, bold = true, colored = false }: {
 }) {
   return (
     <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-row-summary">
-      <span className={`text-xs ${bold ? 'font-semibold' : ''}`}>{label}</span>
-      <span className={`text-sm tabular-nums ${bold ? 'font-semibold' : ''} ${colored && value < 0 ? 'text-destructive' : ''}`}>
+      <span className={`text-xs ${bold ? 'font-bold' : ''}`}>{label}</span>
+      <span className={`text-sm tabular-nums rounded px-1 ${bold ? 'font-bold' : ''} ${moneyTone(colored ? value : Math.min(value, 0))}`}>
         {formatGBP(value)}
       </span>
     </div>
@@ -407,9 +412,9 @@ function SectionHeaderMobile({ label, total, open, onToggle, accent }: {
     >
       <div className="flex items-center gap-1.5">
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span className="text-xs font-semibold">{label}</span>
+        <span className="font-display text-sm font-extrabold">{label}</span>
       </div>
-      <span className={`text-sm font-semibold tabular-nums ${total < 0 ? 'text-destructive' : ''}`}>
+      <span className={`text-sm font-bold tabular-nums rounded px-1 ${moneyTone(total)}`}>
         {formatGBP(total)}
       </span>
     </button>
@@ -424,11 +429,11 @@ function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAl
     <div className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${isAlt ? 'bg-row-alt' : ''}`}>
       <span className="text-xs pl-3 truncate pr-3 flex-1">
         {account.accountName}
-        {readOnly && <span className="ml-1 text-muted-foreground" title="Calculated automatically">🔒</span>}
+        {readOnly && <span className="ml-1 inline-flex align-[-1px] text-muted-foreground" title="Calculated automatically"><Lock className="h-3 w-3" role="img" aria-label="Calculated automatically" /></span>}
       </span>
       <div className="shrink-0 min-w-[80px] text-right">
         {readOnly ? (
-          <span className="text-sm tabular-nums text-muted-foreground">
+          <span className={`text-sm tabular-nums text-muted-foreground rounded px-1 ${moneyTone(account.monthly[monthIndex] ?? 0)}`}>
             {account.monthly[monthIndex] ? formatGBP(account.monthly[monthIndex]) : ''}
           </span>
         ) : (

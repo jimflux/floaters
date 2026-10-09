@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { setProjectionOverride, removeProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
+import { cellTone } from '@/lib/brand';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -175,17 +176,17 @@ export default function EditableCell({
 
   // Non-projected cell — not editable
   if (!isProjected && !isCurrentMonth) {
-    const cls = `text-right text-xs tabular-nums ${value < 0 ? 'text-destructive' : ''} ${isCurrentMonth ? 'bg-col-highlight' : ''}`;
+    const cls = `text-right text-xs tabular-nums ${cellTone(value, isCurrentMonth && as === 'td')}`;
     if (as === 'div') return <div className={cls}>{formatGBP(value)}</div>;
     return <td className={`px-3 py-1.5 ${cls}`}>{formatGBP(value)}</td>;
   }
 
   // Projected cell — editable
   const baseClasses = [
-    'text-right text-xs tabular-nums cursor-pointer hover:bg-accent/50 transition-colors',
-    hasOverride ? 'text-blue-600 font-medium' : 'text-muted-foreground italic',
-    value < 0 ? '!text-destructive' : '',
-    isCurrentMonth ? 'bg-col-highlight' : '',
+    'text-right text-xs tabular-nums cursor-pointer hover:bg-accent transition-colors',
+    hasOverride ? 'text-override font-semibold' : 'text-muted-foreground italic',
+    // The mobile list shows one month at a time, so no column highlight there.
+    cellTone(value, isCurrentMonth && as === 'td'),
   ].join(' ');
   const cellClasses = as === 'td' ? `px-3 py-1.5 ${baseClasses}` : baseClasses;
 
@@ -198,14 +199,14 @@ export default function EditableCell({
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-[200px] p-3 space-y-2" align="end" sideOffset={4}>
-        <p className="text-xs text-muted-foreground font-medium">Edit projection</p>
+        <p className="text-xs text-muted-foreground font-semibold">Edit projection</p>
         <Input
           ref={inputRef}
           type="number"
           value={inputValue}
           onChange={e => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="h-8 text-sm"
+          className="h-9 text-sm tabular-nums"
         />
         {previousValue !== undefined && (
           <div className="space-y-1.5">

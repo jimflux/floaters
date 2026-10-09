@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getCashflow, getProjectionOverrides, getPipeline, getTimeTracking, triggerSync, setProjectionOverride, CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY, type ProjectionOverrideEntry } from '@/lib/api';
 import type { CashflowData, CashflowAccount, CashflowAccountInfo, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { clearCachedData } from '@/lib/cache';
 import { LOGOUT_PATH, SignInRequiredError, loginUrl } from '@/lib/session';
-import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus, Inbox } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus, Inbox, Lock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
@@ -21,9 +21,14 @@ import TimeSection from '@/components/TimeSection';
 import TimePanel from '@/components/TimePanel';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useForecastView } from '@/hooks/use-forecast-view';
+import { cellTone, zeroChip } from '@/lib/brand';
+import FluxMark from '@/components/FluxMark';
 
-const SECONDARY_STROKE_COMMITTED = 'hsl(38 92% 50%)'; // amber: optimistic as the secondary line
+const SECONDARY_STROKE_COMMITTED = 'hsl(var(--iris))'; // iris: optimistic as the secondary line
 const SECONDARY_STROKE_PROJECTED = 'hsl(var(--muted-foreground))'; // committed, muted, as the secondary line
+
+// Outline pill for the aubergine header.
+const HEADER_BUTTON = 'border-2 border-cloud/30 bg-transparent text-cloud hover:border-cloud hover:bg-transparent hover:text-cloud';
 
 const LABEL_WIDTH = 200;
 
@@ -37,14 +42,6 @@ function formatMonth(yyyymm: string): string {
   const [y, m] = yyyymm.split('-');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return `${months[parseInt(m, 10) - 1]} ${y.slice(2)}`;
-}
-
-function getZeroColor(value: string | null): string {
-  if (!value) return 'text-green-600';
-  const lower = value.toLowerCase();
-  if (lower === 'this month' || lower.includes('1 month') || lower.includes('2 month')) return 'text-red-600';
-  if (lower.includes('3 month') || lower.includes('4 month') || lower.includes('5 month')) return 'text-amber-600';
-  return 'text-green-600';
 }
 
 function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
@@ -133,18 +130,18 @@ export default function CashflowPage() {
 
   if (isLoading) return <LoadingSkeleton />;
   if (isError && error instanceof SignInRequiredError) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground">
-      <p className="text-sm text-muted-foreground">Your session has ended.</p>
-      <Button asChild variant="outline" size="sm">
+    <StatusScreen>
+      <p className="text-base text-muted-foreground">Your session has ended.</p>
+      <Button asChild size="sm">
         <a href={loginUrl()}>Sign in</a>
       </Button>
-    </div>
+    </StatusScreen>
   );
   if (isError) return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground">
-      <p className="text-sm text-muted-foreground">Failed to load data: {(error as Error).message}</p>
-      <Button variant="outline" size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['cashflow'] })}>Retry</Button>
-    </div>
+    <StatusScreen>
+      <p className="text-base text-muted-foreground">Failed to load data: {(error as Error).message}</p>
+      <Button size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['cashflow'] })}>Retry</Button>
+    </StatusScreen>
   );
   if (!data) return null;
 
@@ -176,28 +173,31 @@ export default function CashflowPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 h-14 border-b border-border bg-card">
-        <span className="font-semibold text-sm tracking-tight">Floaters</span>
-        <div className="flex items-center gap-3">
-          {lastSync && <span className="text-xs text-muted-foreground">Synced {formatTimeAgo(lastSync)}</span>}
-          <ForecastViewToggle view={view} onChange={setView} />
-          <Button variant="outline" size="sm" className="relative" onClick={() => setPipelineOpen(true)} title="Income pipeline">
+      <header className="flex items-center justify-between gap-4 px-6 h-[72px] bg-aubergine text-cloud">
+        <span className="flex items-center gap-2.5">
+          <FluxMark className="h-7 w-auto" />
+          <span className="font-display font-extrabold text-[28px] leading-none tracking-[-0.05em]">Floaters</span>
+        </span>
+        <div className="flex items-center gap-2.5">
+          {lastSync && <span className="text-xs text-muted-on-aubergine mr-1">Synced {formatTimeAgo(lastSync)}</span>}
+          <ForecastViewToggle view={view} onChange={setView} tone="dark" />
+          <Button variant="outline" size="sm" className={`relative ${HEADER_BUTTON}`} onClick={() => setPipelineOpen(true)} title="Income pipeline">
             <Inbox className="h-3.5 w-3.5" />
-            <span className="ml-1.5">Pipeline</span>
+            <span>Pipeline</span>
             {attentionCount(pipeline) > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-medium flex items-center justify-center">
+              <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1.5 rounded-full bg-sun text-aubergine text-[11px] font-bold flex items-center justify-center ring-2 ring-aubergine">
                 {attentionCount(pipeline)}
               </span>
             )}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+          <Button size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
             <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-            <span className="ml-1.5">Sync Now</span>
+            <span>Sync now</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} title="Account Settings">
+          <Button variant="outline" size="sm" className={`w-9 px-0 ${HEADER_BUTTON}`} onClick={() => setSettingsOpen(true)} title="Account settings" aria-label="Account settings">
             <Settings className="h-3.5 w-3.5" />
           </Button>
-          <a href={LOGOUT_PATH} onClick={clearCachedData} className="text-xs text-muted-foreground hover:text-foreground">
+          <a href={LOGOUT_PATH} onClick={clearCachedData} className="ml-1 text-xs font-semibold text-muted-on-aubergine underline-offset-4 hover:text-cloud hover:underline">
             Sign out
           </a>
         </div>
@@ -205,34 +205,32 @@ export default function CashflowPage() {
 
       <div className="px-6 py-6">
         {/* Single scroll container for chart row + table */}
-        <div className="border border-border rounded-lg overflow-x-auto">
+        <div className="bg-card rounded-card overflow-x-auto shadow-sm shadow-aubergine/5">
           <div style={{ width: responsiveGridWidth, minWidth: minTotalWidth }}>
             {/* Chart row: stat cards (sticky left) + chart */}
             <div className="flex border-b border-border">
               {/* Stat cards — sticky left, same width as label column */}
               <div
-                className="sticky left-0 z-10 bg-card flex flex-col justify-center gap-3 px-3 py-4 border-r border-border shrink-0"
+                className="sticky left-0 z-10 bg-card flex flex-col justify-center gap-2 p-3 shrink-0"
                 style={{ width: LABEL_WIDTH, minWidth: LABEL_WIDTH }}
               >
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Today's balance</p>
-                  <p className="text-2xl font-bold tracking-tight tabular-nums">{formatGBP(currentBalance)}</p>
+                <div className="rounded-tile bg-cloud px-3.5 py-3">
+                  <p className="text-xs font-semibold text-muted-foreground mb-1">Today's balance</p>
+                  <p className={`stat-value ${currentBalance < 0 ? 'money-neg rounded-md px-1 -mx-1' : ''}`}>{formatGBP(currentBalance)}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Drops below £0</p>
-                  <p className={`text-2xl font-bold tracking-tight ${getZeroColor(primaryFallsBelow)}`}>
-                    {primaryFallsBelow || 'Never'}
-                  </p>
+                <div className="rounded-tile bg-cloud px-3.5 py-3">
+                  <p className="text-xs font-semibold text-muted-foreground mb-1.5">Drops below £0</p>
+                  <ZeroChip value={primaryFallsBelow} />
                   {secondaryFallsBelow !== primaryFallsBelow && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-1.5">
                       {secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}
                     </p>
                   )}
                 </div>
                 {vatOwedNow != null && (
-                  <div title="Output VAT accrued on issued invoices this quarter, not yet paid to HMRC">
-                    <p className="text-xs text-muted-foreground mb-1">VAT owed</p>
-                    <p className="text-2xl font-bold tracking-tight tabular-nums">{formatGBP(vatOwedNow)}</p>
+                  <div className="rounded-tile bg-cloud px-3.5 py-3" title="Output VAT accrued on issued invoices this quarter, not yet paid to HMRC">
+                    <p className="text-xs font-semibold text-muted-foreground mb-1">VAT owed</p>
+                    <p className="stat-value">{formatGBP(vatOwedNow)}</p>
                   </div>
                 )}
               </div>
@@ -263,10 +261,10 @@ export default function CashflowPage() {
                 ))}
               </colgroup>
               <thead>
-                <tr className="border-b border-border">
-                  <th className="sticky left-0 z-10 bg-card text-left px-3 py-2 text-xs font-medium text-muted-foreground">Account</th>
+                <tr className="border-y border-border">
+                  <th className="sticky left-0 z-10 bg-card text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground">Account</th>
                   {months.map((m, i) => (
-                    <th key={m} className={`px-3 py-2 text-right text-xs font-medium text-muted-foreground ${i === currentMonthIndex ? 'bg-col-highlight' : 'bg-card'}`}>
+                    <th key={m} className={`px-3 py-2.5 text-right text-xs font-semibold ${i === currentMonthIndex ? 'bg-col-highlight text-foreground shadow-[inset_0_-3px_0_hsl(var(--iris))]' : 'bg-card text-muted-foreground'}`}>
                       {formatMonth(m)}
                     </th>
                   ))}
@@ -288,7 +286,7 @@ export default function CashflowPage() {
                 />
 
                 {/* Spacer between sections */}
-                <tr><td colSpan={months.length + 1} className="h-2 border-0 bg-background" /></tr>
+                <tr><td colSpan={months.length + 1} className="h-3 border-0 bg-card" /></tr>
 
                 {/* Costs section */}
                 <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
@@ -311,7 +309,7 @@ export default function CashflowPage() {
                 <SummaryRow label="Ending balance" values={primaryClosing} months={months} currentMonthIndex={currentMonthIndex} />
 
                 {/* Spacer, then hours: context under the money, never part of it */}
-                <tr><td colSpan={months.length + 1} className="h-2 border-0 bg-background" /></tr>
+                <tr><td colSpan={months.length + 1} className="h-3 border-0 bg-card" /></tr>
                 <TimeSection
                   time={time}
                   months={months}
@@ -340,9 +338,9 @@ function SummaryRow({ label, values, months, currentMonthIndex, bold = true, col
 }) {
   return (
     <tr className="border-b border-border bg-row-summary">
-      <td className={`sticky left-0 z-10 bg-row-summary px-3 py-1.5 text-xs ${bold ? 'font-semibold' : ''}`}>{label}</td>
+      <td className={`sticky left-0 z-10 bg-row-summary px-3 py-2 text-xs ${bold ? 'font-bold' : ''}`}>{label}</td>
       {months.map((m, i) => (
-        <td key={m} className={`px-3 py-1.5 text-right text-xs tabular-nums ${bold ? 'font-semibold' : ''} ${colored && values[i] < 0 ? 'text-destructive' : ''} ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}>
+        <td key={m} className={`px-3 py-2 text-right text-xs tabular-nums ${bold ? 'font-bold' : ''} ${cellTone(colored ? values[i] : Math.min(values[i], 0), i === currentMonthIndex)}`}>
           {formatGBP(values[i])}
         </td>
       ))}
@@ -354,10 +352,10 @@ function SectionHeader({ label, open, onToggle, months, currentMonthIndex, accou
   label: string; open: boolean; onToggle: () => void; months: string[]; currentMonthIndex: number;
   accounts: CashflowAccount[]; allAccounts: CashflowAccountInfo[]; existingCodes: string[]; section: 'income' | 'costs';
 }) {
-  const accentColor = section === 'income' ? 'border-l-section-income' : 'border-l-section-costs';
+  const accentColor = section === 'income' ? 'shadow-[inset_4px_0_0_hsl(var(--section-income))]' : 'shadow-[inset_4px_0_0_hsl(var(--section-costs))]';
   return (
-    <tr className={`border-b border-border cursor-pointer hover:bg-muted/20 ${accentColor} border-l-2`} onClick={onToggle}>
-      <td className="sticky left-0 z-10 bg-card px-3 py-2 text-xs font-semibold">
+    <tr className="border-b border-border cursor-pointer hover:bg-muted/20" onClick={onToggle}>
+      <td className={`sticky left-0 z-10 bg-card px-3 py-2.5 font-display text-sm font-extrabold tracking-[-0.01em] ${accentColor}`}>
         <div className="flex items-center gap-1">
           {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
           <span>{label}</span>
@@ -373,7 +371,7 @@ function SectionHeader({ label, open, onToggle, months, currentMonthIndex, accou
       {months.map((m, i) => {
         const total = sumMonthly(accounts, i);
         return (
-          <td key={m} className={`px-3 py-2 text-right text-xs font-semibold tabular-nums ${total < 0 ? 'text-destructive' : ''} ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}>
+          <td key={m} className={`px-3 py-2.5 text-right text-xs font-bold tabular-nums ${cellTone(total, i === currentMonthIndex)}`}>
             {formatGBP(total)}
           </td>
         );
@@ -393,14 +391,14 @@ function AccountRow({ account, months, currentMonthIndex, rowIndex, overrideAmou
     <tr className={`border-b border-border hover:bg-muted/10 ${isAlt ? 'bg-row-alt' : ''}`}>
       <td className={`sticky left-0 z-10 px-3 py-1.5 text-xs pl-7 truncate ${isAlt ? 'bg-row-alt' : 'bg-card'}`}>
         {account.accountName}
-        {readOnly && <span className="ml-1 text-muted-foreground" title="Calculated automatically from your VAT settings">🔒</span>}
+        {readOnly && <span className="ml-1 inline-flex align-[-1px] text-muted-foreground" title="Calculated automatically from your VAT settings"><Lock className="h-3 w-3" role="img" aria-label="Calculated automatically" /></span>}
       </td>
       {months.map((m, i) =>
         readOnly ? (
           <td
             key={m}
             title="VAT is calculated automatically"
-            className={`px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground cursor-default ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+            className={`px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground cursor-default ${cellTone(account.monthly[i] ?? 0, i === currentMonthIndex)}`}
           >
             {account.monthly[i] ? formatGBP(account.monthly[i]) : ''}
           </td>
@@ -440,7 +438,7 @@ function AddAccountButton({ section, allAccounts, existingCodes, months, current
     mutationFn: (accountCode: string) => setProjectionOverride(accountCode, seedMonth, 0),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cashflow'] });
-      toast.success('Account added — click any projected cell to set values');
+      toast.success('Account added. Click any projected cell to set values');
     },
     onError: () => toast.error('Failed to add account'),
   });
@@ -451,7 +449,7 @@ function AddAccountButton({ section, allAccounts, existingCodes, months, current
     <Popover open={listOpen} onOpenChange={setListOpen}>
       <PopoverTrigger asChild>
         <button
-          className="ml-1 p-0.5 rounded hover:bg-accent/50 transition-colors"
+          className="ml-1 h-6 w-6 inline-flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud transition-colors"
           onClick={e => { e.stopPropagation(); }}
           title="Add account projection"
         >
@@ -459,11 +457,11 @@ function AddAccountButton({ section, allAccounts, existingCodes, months, current
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-[240px] p-2 max-h-[300px] overflow-y-auto" align="start" sideOffset={4}>
-        <p className="text-xs font-medium text-muted-foreground px-2 py-1">Add account</p>
+        <p className="text-xs font-semibold text-muted-foreground px-2 py-1">Add account</p>
         {available.map(a => (
           <button
             key={a.code}
-            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-accent/50 transition-colors"
+            className="w-full text-left px-2 py-1.5 text-xs rounded-lg hover:bg-accent transition-colors"
             onClick={() => { setListOpen(false); addMutation.mutate(a.code); }}
           >
             <span>{a.name}</span>
@@ -478,12 +476,36 @@ function AddAccountButton({ section, allAccounts, existingCodes, months, current
 function LoadingSkeleton() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="h-14 border-b border-border" />
+      <div className="h-[72px] bg-aubergine" />
       <div className="px-6 py-6 space-y-6">
-        <Skeleton className="h-[240px] rounded-lg" />
-        <Skeleton className="h-[400px] rounded-lg" />
+        <Skeleton className="h-[240px] rounded-card" />
+        <Skeleton className="h-[400px] rounded-card" />
       </div>
     </div>
+  );
+}
+
+// Signed-out and error states: the brand mark, the message, one action.
+function StatusScreen({ children }: { children: ReactNode }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5 px-6 bg-background text-foreground text-center">
+      <FluxMark className="h-14 w-auto" />
+      <p className="font-display font-extrabold text-[32px] leading-none tracking-[-0.05em]">Floaters</p>
+      {children}
+    </div>
+  );
+}
+
+// "Drops below £0" as a chip whose fill tracks urgency; the words and icon
+// carry the meaning on their own.
+function ZeroChip({ value }: { value: string | null }) {
+  const safe = !value;
+  const Icon = safe ? CheckCircle2 : AlertTriangle;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-display text-lg font-extrabold leading-tight tracking-[-0.02em] ${zeroChip(value)}`}>
+      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {value || 'Never'}
+    </span>
   );
 }
 

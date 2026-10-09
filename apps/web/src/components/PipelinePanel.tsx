@@ -59,11 +59,11 @@ export default function PipelinePanel({ open, onOpenChange, pipeline }: Props) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:w-[480px] p-0 flex flex-col">
-        <SheetHeader className="px-6 pt-6 pb-2">
-          <SheetTitle className="text-sm font-semibold">Income Pipeline</SheetTitle>
+        <SheetHeader className="px-6 pt-6 pb-3">
+          <SheetTitle>Income pipeline</SheetTitle>
         </SheetHeader>
         <Tabs defaultValue="review" className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="mx-6 mb-2">
+          <TabsList className="mx-6 mb-2 self-start">
             <TabsTrigger value="review" className="text-xs">
               To review{unreviewedCount > 0 ? ` (${unreviewedCount})` : ''}
             </TabsTrigger>
@@ -144,7 +144,12 @@ function ReviewTab({ pipeline }: { pipeline: PipelineResponse | undefined }) {
   });
 
   if (unreviewed.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">Nothing to review. All caught up.</p>;
+    return (
+      <div className="rounded-card bg-card px-6 py-10 text-center">
+        <p className="font-display text-xl font-extrabold tracking-[-0.02em]">Nothing to review.</p>
+        <p className="text-sm text-muted-foreground mt-1">All caught up.</p>
+      </div>
+    );
   }
 
   const allSelected = selected.size === unreviewed.length && unreviewed.length > 0;
@@ -158,14 +163,14 @@ function ReviewTab({ pipeline }: { pipeline: PipelineResponse | undefined }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between py-1">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+        <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground cursor-pointer">
           <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all" />
           Select all
         </label>
         {selected.size > 0 && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button size="sm" className="h-7 text-xs">Approve selected ({selected.size})</Button>
+              <Button size="sm" className="h-8 text-xs">Approve selected ({selected.size})</Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
@@ -216,28 +221,28 @@ function ReviewRow({ invoice, projections, checked, onCheck, onApprove, onAssign
   });
 
   return (
-    <div className="border border-border rounded-md p-2.5 space-y-1.5">
-      <div className="flex items-start gap-2">
+    <div className="bg-card rounded-tile p-3.5 space-y-2.5">
+      <div className="flex items-start gap-2.5">
         <Checkbox checked={checked} onCheckedChange={onCheck} className="mt-0.5" aria-label={`Select ${invoice.contactName || 'invoice'}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium truncate">{invoice.contactName || 'Unknown client'}</p>
+            <p className="text-sm font-semibold truncate">{invoice.contactName || 'Unknown client'}</p>
             {invoice.overdue && (
-              <span className="text-[10px] font-medium text-red-600 bg-red-500/10 px-1.5 py-0.5 rounded">Overdue</span>
+              <span className="text-[11px] font-bold text-aubergine bg-coral px-2 py-0.5 rounded-full">Overdue</span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground tabular-nums">
             {formatGBP(invoice.amountDue || invoice.total)}
             {invoice.dueDate ? ` · due ${invoice.dueDate}` : ''}
             {invoice.status === 'PAID' ? ' · paid' : ''}
           </p>
         </div>
       </div>
-      <div className="flex gap-1.5 pl-6">
-        <Button size="sm" variant="outline" className="h-6 text-xs" onClick={onApprove}>Approve</Button>
+      <div className="flex gap-1.5 pl-[26px]">
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onApprove}>Approve</Button>
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
-            <Button size="sm" variant="outline" className="h-6 text-xs" disabled={projections.length === 0} title={projections.length === 0 ? 'No projections to assign to' : undefined}>
+            <Button size="sm" variant="outline" className="h-8 text-xs" disabled={projections.length === 0} title={projections.length === 0 ? 'No projections to assign to' : undefined}>
               <Link2 className="h-3 w-3 mr-1" />Assign
             </Button>
           </PopoverTrigger>
@@ -283,12 +288,12 @@ function ProjectionsTab({ pipeline }: { pipeline: PipelineResponse | undefined }
       <CreateProjectionForm contacts={pipeline?.contacts ?? []} />
 
       {projections.length === 0 && (
-        <p className="text-sm text-muted-foreground py-4 text-center">No projections yet. Add your first above.</p>
+        <p className="text-sm text-muted-foreground py-6 text-center">No projections yet. Add your first above.</p>
       )}
 
       {lapsed.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-amber-600 mb-2">Lapsed, re-date or delete</p>
+          <p className="mb-2"><span className="inline-flex items-center rounded-full bg-sun px-2.5 py-0.5 text-xs font-bold text-aubergine">Lapsed, re-date or delete</span></p>
           <div className="space-y-2">
             {lapsed.map(p => <ProjectionRow key={p.id} projection={p} lapsed />)}
           </div>
@@ -297,7 +302,7 @@ function ProjectionsTab({ pipeline }: { pipeline: PipelineResponse | undefined }
 
       {active.length > 0 && (
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-2">Active</p>
+          <p className="text-xs font-semibold text-muted-foreground mb-2">Active</p>
           <div className="space-y-2">
             {active.map(p => <ProjectionRow key={p.id} projection={p} />)}
           </div>
@@ -359,11 +364,11 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
   };
 
   return (
-    <div className="border border-border rounded-md p-3 space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">Add projection</p>
+    <div className="bg-card rounded-tile p-4 space-y-2.5">
+      <p className="font-display text-base font-extrabold tracking-[-0.01em]">Add projection</p>
       <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="h-8 w-full justify-start text-xs font-normal">
+          <Button variant="outline" className="h-9 w-full justify-start rounded-[10px] text-xs font-normal">
             {label || 'Client…'}
           </Button>
         </PopoverTrigger>
@@ -417,7 +422,7 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
       </label>
 
       {recurring && (
-        <div className="space-y-2 pl-1 border-l-2 border-border">
+        <div className="space-y-2 pl-1 border-l-2 border-iris-light">
           <div className="flex gap-2 pl-2">
             <div className="flex-1">
               <label className="text-[10px] text-muted-foreground" htmlFor="proj-count">For (months)</label>
@@ -456,7 +461,7 @@ function CreateProjectionForm({ contacts }: { contacts: PipelineResponse['contac
         </div>
       )}
 
-      <Button size="sm" className="h-7 text-xs w-full" onClick={handleAdd} disabled={createMutation.isPending}>
+      <Button size="sm" className="h-9 text-xs w-full" onClick={handleAdd} disabled={createMutation.isPending}>
         {recurring ? `Add projection (${Math.max(1, count)} months)` : 'Add projection'}
       </Button>
     </div>
@@ -505,18 +510,18 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
   };
 
   return (
-    <div className={`border rounded-md p-2.5 ${lapsed ? 'border-amber-400/60 bg-amber-500/5' : 'border-border'}`}>
+    <div className={`rounded-tile p-3.5 ${lapsed ? 'bg-card border-2 border-sun shadow-[inset_4px_0_0_hsl(var(--sun))]' : 'bg-card'}`}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-medium truncate">{projection.clientLabel}</p>
+            <p className="text-sm font-semibold truncate">{projection.clientLabel}</p>
             {overAssignedBy > 0 && (
-              <span className="text-[10px] font-medium text-amber-600 bg-amber-500/10 px-1.5 py-0.5 rounded" title="Assigned invoices exceed the projected amount">
+              <span className="shrink-0 whitespace-nowrap text-[11px] font-bold text-aubergine bg-sun px-2 py-0.5 rounded-full tabular-nums" title="Assigned invoices exceed the projected amount">
                 Over-assigned by {formatGBP(overAssignedBy)}
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground tabular-nums">
             {projection.recurrenceCount > 1
               ? `${formatGBP(projection.amount)}/mo · ${formatMonth(projection.expectedMonth)}–${formatMonth(addMonthsKey(projection.expectedMonth, projection.recurrenceCount - 1))}`
               : `${formatGBP(projection.amount)} · ${formatMonth(projection.expectedMonth)}`}
@@ -530,19 +535,19 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
         </div>
         <Popover open={dateOpen} onOpenChange={setDateOpen}>
           <PopoverTrigger asChild>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Re-date">
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" title="Re-date" aria-label="Re-date">
               <CalendarClock className="h-3.5 w-3.5" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-[200px] p-3 space-y-2" align="end">
-            <p className="text-xs text-muted-foreground font-medium">Expected month</p>
+            <p className="text-xs text-muted-foreground font-semibold">Expected month</p>
             <Input type="month" value={newMonth} onChange={e => setNewMonth(e.target.value)} className="h-8 text-sm" />
-            <Button size="sm" className="h-7 text-xs w-full" onClick={handleRedate}>Save</Button>
+            <Button size="sm" className="h-8 text-xs w-full" onClick={handleRedate}>Save</Button>
           </PopoverContent>
         </Popover>
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" title="Delete">
+            <Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-coral hover:text-aubergine" title="Delete" aria-label="Delete">
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </AlertDialogTrigger>
@@ -557,7 +562,7 @@ function ProjectionRow({ projection, lapsed = false }: { projection: PipelinePro
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => deleteMutation.mutate()}>Delete</AlertDialogAction>
+              <AlertDialogAction className="bg-coral text-aubergine hover:bg-coral-light" onClick={() => deleteMutation.mutate()}>Delete</AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

@@ -1,105 +1,130 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Flux 2026 brand. Hex values mirror flux.am design/tokens.css; the HSL
+   channel versions below feed Tailwind so opacity modifiers keep working.
+   Colour rules: mint, sun and coral take aubergine text only; iris is large
+   text only on cloud (iris-deep for small text and links). */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 9%;
+    --flux-aubergine: #221A34;
+    --flux-cloud: #EFEFF3;
+    --flux-white: #FFFFFF;
+    --flux-iris: #7069AD;
+    --flux-iris-deep: #4E4790;
+    --flux-iris-light: #A9A3E0;
+    --flux-mint: #98CFBB;
+    --flux-sun: #FAC142;
+    --flux-coral: #E95B5F;
+    --flux-sun-light: #FCDA8E;
+    --flux-mint-light: #C1E2D6;
+    --flux-coral-light: #F29D9F;
+    --flux-muted-on-cloud: #5A5470;
+    --flux-muted-on-aubergine: #D8D6E6;
+
+    --font-display: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', system-ui, sans-serif;
+    --font-text: 'Figtree Variable', 'Figtree', system-ui, sans-serif;
+
+    --radius-card: 28px;
+    --radius-tile: 18px;
+    --radius-pill: 999px;
+
+    /* Brand colours as HSL channels */
+    --aubergine: 258 33% 15%;
+    --cloud: 240 14% 94.5%;
+    --iris: 246 29% 54.5%;
+    --iris-deep: 246 34% 42%;
+    --iris-light: 246 50% 76%;
+    --mint: 158 36% 70%;
+    --sun: 41 95% 62%;
+    --coral: 358 76% 64%;
+    --sun-light: 41 95% 77%;
+    --mint-light: 158 37% 82%;
+    --coral-light: 359 77% 78%;
+    --muted-on-aubergine: 248 25% 87%;
+
+    /* shadcn roles mapped onto the brand */
+    --background: var(--cloud);
+    --foreground: var(--aubergine);
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 9%;
+    --card-foreground: var(--aubergine);
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 9%;
+    --popover-foreground: var(--aubergine);
 
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 100%;
+    --primary: var(--sun);
+    --primary-foreground: var(--aubergine);
 
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 9%;
+    --secondary: var(--cloud);
+    --secondary-foreground: var(--aubergine);
 
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
+    --muted: 240 14% 92%;
+    --muted-foreground: 253 14% 38%; /* muted-on-cloud #5A5470 */
 
-    --accent: 0 0% 96%;
-    --accent-foreground: 0 0% 9%;
+    --accent: 246 40% 93%;
+    --accent-foreground: var(--aubergine);
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: var(--coral);
+    --destructive-foreground: var(--aubergine);
 
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 0 0% 9%;
+    --border: 248 16% 86%;
+    --input: 248 14% 72%;
+    --ring: var(--aubergine);
 
-    --radius: 0.25rem;
+    --radius: 0.75rem;
 
-    --chrome: 0 0% 98%;
-    --success: 142 71% 45%;
-    --warning: 38 92% 50%;
-    --danger: 0 84% 60%;
+    --chrome: var(--aubergine);
+    --success: var(--mint);
+    --warning: var(--sun);
+    --danger: var(--coral);
 
-    --row-alt: 0 0% 98.5%;
-    --row-summary: 0 0% 97%;
-    --col-highlight: 213 94% 97%;
-    --section-income: 142 71% 45%;
-    --section-costs: 0 84% 60%;
-    --section-hours: 217 91% 60%;
+    /* Grid surfaces */
+    --row-alt: 240 20% 98%;
+    --row-summary: 240 14% 96%;
+    --col-highlight: 246 45% 95%;
+    --section-income: var(--mint);
+    --section-costs: var(--coral);
+    --section-hours: var(--iris);
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 0 0% 9%;
-    --sidebar-primary: 0 0% 9%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 93%;
-    --sidebar-accent-foreground: 0 0% 9%;
-    --sidebar-border: 0 0% 90%;
-    --sidebar-ring: 0 0% 9%;
+    /* Money states. Negative cells get a coral tint behind aubergine text
+       (coral itself fails text contrast on white) plus the minus sign. */
+    --money-negative-bg: 359 77% 93%;
+    --override: var(--iris-deep);
+
+    --sidebar-background: var(--cloud);
+    --sidebar-foreground: var(--aubergine);
+    --sidebar-primary: var(--aubergine);
+    --sidebar-primary-foreground: var(--cloud);
+    --sidebar-accent: 246 40% 93%;
+    --sidebar-accent-foreground: var(--aubergine);
+    --sidebar-border: 248 16% 86%;
+    --sidebar-ring: var(--aubergine);
   }
 
+  /* No theme switch ships today; kept so a .dark ancestor still reads on brand. */
   .dark {
-    --background: 0 0% 5%;
-    --foreground: 0 0% 95%;
-
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 95%;
-
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 95%;
-
-    --primary: 0 0% 95%;
-    --primary-foreground: 0 0% 5%;
-
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 0 0% 95%;
-
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 55%;
-
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 95%;
-
-    --destructive: 0 62% 30%;
-    --destructive-foreground: 0 0% 95%;
-
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 0 0% 83%;
-
-    --chrome: 0 0% 8%;
-    --success: 142 71% 45%;
-    --warning: 38 92% 50%;
-    --danger: 0 84% 60%;
-
-    --sidebar-background: 0 0% 7%;
-    --sidebar-foreground: 0 0% 95%;
-    --sidebar-primary: 0 0% 95%;
-    --sidebar-primary-foreground: 0 0% 5%;
-    --sidebar-accent: 0 0% 12%;
-    --sidebar-accent-foreground: 0 0% 95%;
-    --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 0 0% 83%;
+    --background: var(--aubergine);
+    --foreground: var(--cloud);
+    --card: 258 30% 20%;
+    --card-foreground: var(--cloud);
+    --popover: 258 30% 20%;
+    --popover-foreground: var(--cloud);
+    --secondary: 258 25% 26%;
+    --secondary-foreground: var(--cloud);
+    --muted: 258 25% 26%;
+    --muted-foreground: var(--muted-on-aubergine);
+    --accent: 258 25% 28%;
+    --accent-foreground: var(--cloud);
+    --border: 258 20% 32%;
+    --input: 258 20% 36%;
+    --ring: var(--sun);
+    --col-highlight: 258 30% 25%;
+    --row-alt: 258 30% 22%;
+    --row-summary: 258 28% 24%;
+    --money-negative-bg: 359 40% 30%;
+    --override: var(--iris-light);
   }
 }
 
@@ -115,24 +140,53 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply font-semibold tracking-tight text-foreground;
+    @apply font-display text-foreground;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  /* Every figure in the grid lines up in columns. */
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Visible focus everywhere: 3px aubergine outline with a sun ring, as on
+   flux.am. Unlayered and important so it beats shadcn's focus-visible:outline-none
+   and ring utilities. */
+:focus-visible {
+  outline: 3px solid var(--flux-aubergine) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 6px var(--flux-sun) !important;
+}
+
+/* On the aubergine header the outline switches to cloud so it stays visible. */
+header :focus-visible {
+  outline-color: var(--flux-cloud) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
 @layer utilities {
-  .font-mono-data {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-  }
-
   .text-label {
     @apply text-muted-foreground;
     font-size: 11px;
   }
 
   .stat-value {
-    @apply font-mono-data font-semibold text-foreground;
-    font-size: 24px;
-    line-height: 1.2;
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    line-height: 1.1;
   }
 
   .stat-label {
@@ -148,8 +202,27 @@
     @apply transition-colors hover:bg-accent/50;
   }
 
+  /* Negative money: aubergine text on a coral tint with a coral edge, minus
+     sign kept, so it never relies on colour alone. */
+  .money-neg {
+    background-color: hsl(var(--money-negative-bg)) !important;
+    color: hsl(var(--foreground)) !important;
+    box-shadow: inset 3px 0 0 hsl(var(--coral));
+  }
+
+  /* Legend and status dot: brand fill with an aubergine ring so pale fills
+     (mint, sun) still read against white. */
+  .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 1.5px hsl(var(--aubergine));
+    flex-shrink: 0;
+  }
+
   .status-dot {
-    @apply inline-block w-2 h-2 rounded-full;
+    @apply dot;
   }
 
   .status-dot-green {
