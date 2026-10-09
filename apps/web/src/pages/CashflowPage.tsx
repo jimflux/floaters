@@ -9,6 +9,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { clearCachedData } from '@/lib/cache';
+import { LOGOUT_PATH, SignInRequiredError, loginUrl } from '@/lib/session';
 import { RefreshCw, ChevronDown, ChevronRight, Settings, Plus, Inbox } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import EditableCell from '@/components/EditableCell';
@@ -130,6 +132,14 @@ export default function CashflowPage() {
   });
 
   if (isLoading) return <LoadingSkeleton />;
+  if (isError && error instanceof SignInRequiredError) return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <p className="text-sm text-muted-foreground">Your session has ended.</p>
+      <Button asChild variant="outline" size="sm">
+        <a href={loginUrl()}>Sign in</a>
+      </Button>
+    </div>
+  );
   if (isError) return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background text-foreground">
       <p className="text-sm text-muted-foreground">Failed to load data: {(error as Error).message}</p>
@@ -187,6 +197,9 @@ export default function CashflowPage() {
           <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)} title="Account Settings">
             <Settings className="h-3.5 w-3.5" />
           </Button>
+          <a href={LOGOUT_PATH} onClick={clearCachedData} className="text-xs text-muted-foreground hover:text-foreground">
+            Sign out
+          </a>
         </div>
       </header>
 

@@ -4,6 +4,8 @@ import { triggerSync, getPipeline } from '@/lib/api';
 import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { clearCachedData } from '@/lib/cache';
+import { LOGOUT_PATH } from '@/lib/session';
 import { RefreshCw, ChevronDown, ChevronRight, ChevronLeft, ChevronRight as ChevR, LogOut, Settings, Inbox, Clock } from 'lucide-react';
 import AccountManagementPanel from '@/components/AccountManagementPanel';
 import PipelinePanel, { attentionCount } from '@/components/PipelinePanel';
@@ -142,8 +144,10 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
           <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setSettingsOpen(true)} title="Settings">
             <Settings className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => { document.cookie = 'app_unlocked=; max-age=0; path=/'; window.location.reload(); }} title="Lock">
-            <LogOut className="h-3.5 w-3.5" />
+          <Button asChild variant="ghost" size="sm" className="h-8 w-8 p-0" title="Sign out">
+            <a href={LOGOUT_PATH} onClick={clearCachedData} aria-label="Sign out">
+              <LogOut className="h-3.5 w-3.5" />
+            </a>
           </Button>
         </div>
       </header>
