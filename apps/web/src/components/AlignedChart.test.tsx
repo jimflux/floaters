@@ -29,7 +29,7 @@ describe("AlignedChart solid/dashed split (regression for split point moving on 
 
     expect(solidPath).toBeDefined();
     expect(dashedPath).toBeDefined();
-    expect(solidPath!.getAttribute("stroke-width")).toBe("2");
+    expect(solidPath!.getAttribute("stroke-width")).toBe("2.5");
     expect(solidPath!.hasAttribute("stroke-dasharray")).toBe(false);
 
     const solidD = solidPath!.getAttribute("d")!.trim();
