@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-// No session to clear — API key auth is stateless.
+// Legacy no-op. To sign out of the web app, use GET /auth/logout.
 export async function POST() {
   return NextResponse.json({ ok: true });
 }
