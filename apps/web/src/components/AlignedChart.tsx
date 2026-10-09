@@ -113,12 +113,6 @@ export default function AlignedChart({
   const points = chartValues.map((v, i) => ({ x: toX(i), y: toY(v), value: v }));
   const optPoints = optValues.map((v, i) => ({ x: toX(i), y: toY(v), value: v }));
 
-  // Area path
-  const areaPath = `M 0 ${PADDING_TOP + plotHeight} ` +
-    `L ${points[0].x} ${points[0].y} ` +
-    points.map(p => `L ${p.x} ${p.y}`).join(' ') +
-    ` L ${svgWidth} ${PADDING_TOP + plotHeight} Z`;
-
   // Historical line ends at the previous month's closing: the current month's
   // closing is a projected month-end, so it belongs to the dashed segment
   const histPoints = points.slice(0, Math.max(currentMonthIndex, 1));
@@ -199,7 +193,6 @@ export default function AlignedChart({
         ))}
 
         {/* Area fill */}
-        <path d={areaPath} fill="hsl(var(--aubergine) / 0.05)" />
 
         {/* Optimistic band (the visible risk gap) */}
         {hasDivergence && optFutPoints.length > 1 && (
@@ -209,22 +202,22 @@ export default function AlignedChart({
         {/* Historical line. non-scaling-stroke keeps a true 2px weight despite
             the non-uniform viewBox scaling. */}
         {histPoints.length > 1 && (
-          <path d={histLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          <path d={histLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2.5} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Future line (dashed) */}
         {futPoints.length > 1 && (
-          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2} strokeDasharray="6 3" vectorEffect="non-scaling-stroke" />
+          <path d={futLine} fill="none" stroke="hsl(var(--foreground))" strokeWidth={2.5} strokeDasharray="6 3" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Optimistic line (lighter, dashed) */}
         {hasDivergence && optFutPoints.length > 1 && (
-          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={secondaryStroke} strokeWidth={1.5} strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />
+          <path data-testid="optimistic-line" d={optLine} fill="none" stroke={secondaryStroke} strokeWidth={1.5} strokeDasharray="3 3" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* VAT-adjusted (spendable) line (thin, dotted) */}
         {hasAdjusted && adjFutPoints.length > 1 && (
-          <path data-testid="adjusted-line" d={adjLine} fill="none" stroke={adjustedStroke} strokeWidth={1.5} strokeDasharray="1 3" vectorEffect="non-scaling-stroke" />
+          <path data-testid="adjusted-line" d={adjLine} fill="none" stroke={adjustedStroke} strokeWidth={2.5} strokeDasharray="0.1 5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Tooltip crosshair (the dot is an HTML overlay below) */}
@@ -286,7 +279,7 @@ export default function AlignedChart({
           )}
           {hasAdjusted && (
             <span className="flex items-center gap-1.5">
-              <LegendSwatch stroke={adjustedStroke} dash="0.5 2.5" />
+              <LegendSwatch stroke={adjustedStroke} dash="0.1 4" />
               {adjustedLabel}
             </span>
           )}
