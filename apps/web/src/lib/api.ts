@@ -38,29 +38,17 @@ export function getPipeline(): Promise<PipelineResponse> {
   });
 }
 
-// --- Time tracking (Toggl) ---
+// --- Time tracking (BurnBar) ---
 // Same window as the cashflow query so the Hours section lines up with the grid.
-export function getTimeTracking(): Promise<TimeTrackingResponse> {
-  return apiFetch(`/api/time?back=3&forward=12`, { headers }).then(res => {
+// The API reads BurnBar live and keeps a copy for a minute; fresh skips it.
+export function getTimeTracking(fresh = false): Promise<TimeTrackingResponse> {
+  return apiFetch(`/api/time?back=3&forward=12${fresh ? '&fresh=1' : ''}`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Time tracking fetch failed: ${res.status}`);
     return res.json();
   });
 }
 
-export function triggerTimeSync(full = false): Promise<void> {
-  return apiFetch(`/api/time/sync`, {
-    method: 'POST',
-    headers: jsonHeaders,
-    body: JSON.stringify({ full }),
-  }).then(async res => {
-    if (!res.ok) {
-      const body = await res.json().catch(() => null) as { error?: string } | null;
-      throw new Error(body?.error ?? `Toggl sync failed: ${res.status}`);
-    }
-  });
-}
-
-// Link a Toggl client to a pipeline client key; null clears the explicit
+// Link a BurnBar client to a pipeline client key; null clears the explicit
 // link and falls back to the name match.
 export function patchTimeClientLink(togglClientId: number, clientKey: string | null): Promise<void> {
   return apiFetch(`/api/time`, {

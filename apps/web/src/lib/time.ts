@@ -1,4 +1,4 @@
-// Pure helpers for the Hours (Toggl) surfaces, shared by the grid section,
+// Pure helpers for the Hours (BurnBar) surfaces, shared by the grid section,
 // the mobile block and the panel.
 import type { TimeTrackingResponse, TimeClient } from './types';
 

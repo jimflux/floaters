@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Clock } from 'lucide-react';
 import type { TimeTrackingResponse } from '@/lib/types';
 import { formatHours, monthIndexer, cellTitle } from '@/lib/time';
 
-// Hours worked (from Toggl) as a section under the balance walk. Context, not
+// Hours worked (from BurnBar) as a section under the balance walk. Context, not
 // cash: it shares the grid's month columns so hours sit under the money for
 // the same month, but nothing here enters any total above it.
 
@@ -28,7 +28,7 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
   const running = time?.running ?? null;
   const configured = time?.configured ?? false;
   const clients = time?.clients ?? [];
-  // Billable is a Toggl flag Jim may never set; an all-zero row is noise.
+  // BurnBar has no billable flag, so this is all zeros today; an all-zero row is noise.
   const anyBillable = (time?.totals.billableHours ?? []).some(h => h > 0);
 
   return (
@@ -52,7 +52,7 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
             <button
               className="ml-1 h-6 w-6 inline-flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud transition-colors"
               onClick={e => { e.stopPropagation(); onOpenPanel(); }}
-              title="Time tracking: sync and client links"
+              title="Time tracking: hours and client links"
             >
               <Clock className="h-3 w-3" />
             </button>
@@ -75,9 +75,11 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
       {open && (
         <>
           {!configured ? (
-            <MessageRow months={months} text="Toggl not connected. Set TOGGL_API_TOKEN on the API to pull hours." />
+            <MessageRow months={months} text="BurnBar isn't set up. Set BURNBAR_URL and BURNBAR_READ_TOKEN on the API to show hours." />
+          ) : clients.length === 0 && time?.syncError ? (
+            <MessageRow months={months} text={`Couldn't read hours from BurnBar: ${time.syncError}`} />
           ) : clients.length === 0 ? (
-            <MessageRow months={months} text="No hours synced yet. Sync now pulls the last 12 months from Toggl." />
+            <MessageRow months={months} text="No hours in BurnBar for these months. Hours start in January 2026." />
           ) : (
             <>
               {anyBillable && (

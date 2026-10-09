@@ -50,7 +50,7 @@ interface Props {
   data: CashflowData;
   // Raw override amounts keyed accountCode|month (see CashflowPage)
   overrideAmounts?: Map<string, number>;
-  // Hours from Toggl (see CashflowPage); absent hides the block.
+  // Hours from BurnBar (see CashflowPage); absent hides the block.
   time?: TimeTrackingResponse;
 }
 

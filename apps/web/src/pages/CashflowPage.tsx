@@ -58,7 +58,7 @@ export default function CashflowPage() {
   // The pipeline panel (review tray + projections manager) opens from the
   // income header's + button and the header badge.
   const [pipelineOpen, setPipelineOpen] = useState(false);
-  // Hours (Toggl) section under the balance walk, and its panel.
+  // Hours (BurnBar) section under the balance walk, and its panel.
   const [hoursOpen, setHoursOpen] = useState(true);
   const [timeOpen, setTimeOpen] = useState(false);
   const [view, setView] = useForecastView();
@@ -86,11 +86,11 @@ export default function CashflowPage() {
     queryFn: getPipeline,
   });
 
-  // Hours from Toggl. Absent (unconfigured or failed) simply leaves the
+  // Hours from BurnBar. Absent (unconfigured or failed) simply leaves the
   // section explaining itself; the grid never depends on it.
   const { data: time } = useQuery<TimeTrackingResponse>({
     queryKey: ['time'],
-    queryFn: getTimeTracking,
+    queryFn: () => getTimeTracking(),
   });
 
   // Raw override amounts, keyed accountCode|month, so editing a blended cell

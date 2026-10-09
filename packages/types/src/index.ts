@@ -148,16 +148,19 @@ export interface ApiError {
   details?: string;
 }
 
-// --- Time tracking (Toggl) ---
+// --- Time tracking (BurnBar) ---
 // Hours are context for the cashflow, never cash: nothing here feeds either
-// balance walk. Rolled up by Toggl client, with an optional link to the income
-// pipeline's clientKey so hours can sit next to what was invoiced.
+// balance walk. Rolled up by BurnBar client, with an optional link to the
+// income pipeline's clientKey so hours can sit next to what was invoiced.
+// Field names keep their Toggl-era "toggl" prefix so the contract stays put:
+// BurnBar kept the Toggl client and project ids. BurnBar has no billable flag
+// or rates, so billable is always false, billableHours zero, rate null.
 
 export interface TimeProject {
-  togglProjectId: number;
+  togglProjectId: number; // BurnBar project id; 0 = no project
   name: string;
   billable: boolean;
-  rate: number | null; // Toggl hourly rate when set
+  rate: number | null;
   currency: string | null;
   color: string | null;
   active: boolean;
@@ -166,7 +169,7 @@ export interface TimeProject {
 }
 
 export interface TimeClient {
-  togglClientId: number | null; // null = entries with no client (no project, or a project without one)
+  togglClientId: number | null; // BurnBar client id; null = entries with no client (no project, or a project without one)
   clientName: string;
   clientKey: string | null; // linked pipeline client key (same key space as IncomeClient.clientKey)
   linkSource: "manual" | "auto" | null; // explicit link, matched by name, or unlinked
@@ -179,7 +182,7 @@ export interface TimeClient {
 }
 
 export interface RunningTimeEntry {
-  togglId: number;
+  togglId: number | string; // BurnBar entry ids are UUIDs
   description: string | null;
   projectName: string | null;
   clientName: string | null;
@@ -189,9 +192,9 @@ export interface RunningTimeEntry {
 
 // GET /api/time
 export interface TimeTrackingResponse {
-  configured: boolean; // TOGGL_API_TOKEN present on the API
-  lastSyncedAt: string | null;
-  syncStatus: "idle" | "syncing" | "error";
+  configured: boolean; // BURNBAR_URL and BURNBAR_READ_TOKEN present on the API
+  lastSyncedAt: string | null; // when hours were last read from BurnBar
+  syncStatus: "idle" | "syncing" | "error"; // "error": the last read failed
   syncError: string | null;
   timeZone: string; // the zone entries are bucketed into days/months by
   months: string[]; // same window as the cashflow grid; future months are zero
@@ -201,13 +204,13 @@ export interface TimeTrackingResponse {
   todayHours: number;
   weekHours: number; // Monday-to-date in timeZone
   running: RunningTimeEntry | null;
-  // Pipeline clients a Toggl client can be linked to (for the link picker).
+  // Pipeline clients a BurnBar client can be linked to (for the link picker).
   linkOptions: Array<{ clientKey: string; clientName: string }>;
 }
 
 // GET /api/time/entries
 export interface TimeEntry {
-  togglId: number;
+  togglId: number | string; // BurnBar entry ids are UUIDs
   description: string | null;
   projectName: string | null;
   clientName: string | null;
