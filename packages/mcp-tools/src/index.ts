@@ -50,7 +50,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
           .min(0)
           .max(12)
           .optional()
-          .describe("Historical months to include (default 3, max 12, the synced history depth)."),
+          .describe("Historical months to include (default 3, max 12)."),
         monthsForward: z
           .number()
           .int()
@@ -177,7 +177,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
     {
       title: "Get time tracking (hours by client)",
       description:
-        "Hours worked, pulled from Toggl Track, rolled up by Toggl client per month over the same window as get_cashflow (future months are zero). Each client has total and billable hours, a per-project breakdown, and, when the Toggl client is linked to an income-pipeline client (clientKey matches get_cashflow's, linkSource 'manual' or 'auto' by name), invoicedExVat: the ex-VAT ACCREC invoice totals by issue month, so invoicedExVat[i] / hours[i] is that month's effective rate. Also returns todayHours, weekHours (Monday to date), the currently running entry if any, and sync state. Hours are context only: nothing here feeds the balance walks. configured is false when the API has no TOGGL_API_TOKEN.",
+        "Hours worked, read live from BurnBar (Jim's time tracker), rolled up by BurnBar client per month over the same window as get_cashflow (future months are zero; months before January 2026 are always zero, as hours start then). Each client has total hours, a per-project breakdown, and, when the client is linked to an income-pipeline client (clientKey matches get_cashflow's, linkSource 'manual' or 'auto' by name), invoicedExVat: the ex-VAT ACCREC invoice totals by issue month, so invoicedExVat[i] / hours[i] is that month's effective rate. Also returns todayHours, weekHours (Monday to date), the most recently started running entry if any, and when BurnBar was last read (lastSyncedAt; syncError if the read failed). BurnBar has no billable flag, so billable hours are zero and the toggl-prefixed ids are BurnBar ids. Hours are context only: nothing here feeds the balance walks. configured is false when the API has no BURNBAR_URL or BURNBAR_READ_TOKEN.",
       inputSchema: {
         monthsBack: z
           .number()
@@ -185,7 +185,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
           .min(0)
           .max(12)
           .optional()
-          .describe("Historical months to include (default 3, max 12, the synced history depth)."),
+          .describe("Historical months to include (default 3, max 12)."),
         monthsForward: z
           .number()
           .int()
@@ -209,7 +209,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
     {
       title: "List time entries",
       description:
-        "Individual Toggl time entries over an inclusive local-date range (default: the last 7 days, max 92 days), newest first, with project, client, linked pipeline clientKey, start/stop, duration, billable flag, tags, and whether the entry is still running. Totals for the range are included.",
+        "Individual BurnBar time entries over an inclusive local-date range (default: the last 7 days, max 92 days; nothing before January 2026), newest first, with project, client, linked pipeline clientKey, start/stop, duration, and whether the entry is still running. togglId is the BurnBar entry id (a UUID); billable is always false and tags empty. Totals for the range are included.",
       inputSchema: {
         from: z
           .string()

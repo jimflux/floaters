@@ -1,70 +1,50 @@
 import { supabase } from "@/lib/supabase";
 import { clientKey } from "@/lib/pipeline";
-import type { ClientRow, EntryRow, ProjectRow, LinkOption } from "./rollup";
+import type { LinkOption } from "./rollup";
 
-// Reads for the time routes. Supabase caps a select at 1000 rows; a year of
-// time entries can exceed that, so entries are paged. Missing tables (the
-// migration not yet applied) degrade to empty rather than failing the read.
+// Supabase reads and writes for the hours routes. Hours themselves come live
+// from BurnBar; only the client links live here.
+//
+// Links reuse the Toggl-era table toggl_clients (migration 012): one row per
+// BurnBar client id in toggl_id, the pipeline client key in client_key.
+// BurnBar kept the Toggl client ids, so links set in the Toggl days still
+// apply. Newer BurnBar ids (from 1e10) fit the bigint column.
 
-const PAGE = 1000;
-
-export async function fetchEntries(
-  connectionId: string,
-  fromIso: string,
-  toIso?: string
-): Promise<EntryRow[]> {
-  const all: EntryRow[] = [];
-  for (let offset = 0; ; offset += PAGE) {
-    let q = supabase
-      .from("toggl_time_entries")
-      .select("toggl_id, project_id, project_name, client_name, description, start, stop, duration_seconds, billable, tags, deleted_at")
-      .eq("connection_id", connectionId)
-      .gte("start", fromIso)
-      .order("start", { ascending: true })
-      .range(offset, offset + PAGE - 1);
-    if (toIso) q = q.lt("start", toIso);
-    const { data, error } = await q;
-    if (error || !data) break;
-    all.push(...(data as EntryRow[]));
-    if (data.length < PAGE) break;
-  }
-  return all;
-}
-
-export async function fetchProjects(connectionId: string): Promise<ProjectRow[]> {
-  const { data } = await supabase
-    .from("toggl_projects")
-    .select("toggl_id, toggl_client_id, name, active, billable, rate, currency, color")
-    .eq("connection_id", connectionId);
-  return (data as ProjectRow[] | null) ?? [];
-}
-
-export async function fetchClients(connectionId: string): Promise<ClientRow[]> {
+/** BurnBar client id -> explicit pipeline client key. */
+export async function fetchClientLinks(connectionId: string): Promise<Map<string, string>> {
   const { data } = await supabase
     .from("toggl_clients")
-    .select("toggl_id, name, archived, client_key")
-    .eq("connection_id", connectionId);
-  return (data as ClientRow[] | null) ?? [];
+    .select("toggl_id, client_key")
+    .eq("connection_id", connectionId)
+    .not("client_key", "is", null);
+  const links = new Map<string, string>();
+  for (const row of data ?? []) {
+    if (row.client_key) links.set(String(row.toggl_id), row.client_key as string);
+  }
+  return links;
 }
 
-export type TogglStateRow = {
-  workspace_id: number | null;
-  last_synced_at: string | null;
-  sync_status: "idle" | "syncing" | "error";
-  sync_error: string | null;
-};
-
-export async function fetchState(connectionId: string): Promise<TogglStateRow | null> {
-  const { data } = await supabase
-    .from("toggl_state")
-    .select("workspace_id, last_synced_at, sync_status, sync_error")
-    .eq("connection_id", connectionId)
-    .maybeSingle();
-  return (data as TogglStateRow | null) ?? null;
+/** Sets (or, with null, clears) the explicit link for one BurnBar client. */
+export async function saveClientLink(
+  connectionId: string,
+  client: { id: number; name: string },
+  key: string | null
+): Promise<{ error: string | null }> {
+  const { error } = await supabase.from("toggl_clients").upsert(
+    {
+      connection_id: connectionId,
+      toggl_id: client.id,
+      name: client.name,
+      client_key: key,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "connection_id,toggl_id" }
+  );
+  return { error: error ? error.message : null };
 }
 
 /**
- * The pipeline clients a Toggl client can be linked to: every client key seen
+ * The pipeline clients a BurnBar client can be linked to: every client key seen
  * on an ACCREC invoice or an income projection, named from the most recent
  * invoice contact name (projection labels otherwise).
  */

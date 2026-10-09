@@ -20,8 +20,8 @@ cashflow/forecast/time computation the web app sees. Two ways to reach them:
 | `get_connection` | Connected Xero org + bank accounts + current balances. |
 | `get_forecast` | Day/week/month forecast periods over a date range, optional scenario overlay. Predates the pipeline model (no projections, no overdue roll-forward). Params: `period`, `from`, `to`, `scenarioIds`. |
 | `list_transactions` | Outstanding invoices/bills with amounts due and dates. Params: `type`, `status`. |
-| `get_time_tracking` | Hours from Toggl by client per month (same window as `get_cashflow`), billable split, per-project breakdown, and `invoicedExVat` for clients linked to the income pipeline (effective rate = invoiced / hours). Also today's and this week's hours and the running entry. Params: `monthsBack`, `monthsForward`. |
-| `list_time_entries` | Individual Toggl entries over a date range (default last 7 days, max 92), newest first. Params: `from`, `to`. |
+| `get_time_tracking` | Hours read live from BurnBar by client per month (same window as `get_cashflow`, nothing before January 2026), per-project breakdown, and `invoicedExVat` for clients linked to the income pipeline (effective rate = invoiced / hours). Also today's and this week's hours and the running entry. Params: `monthsBack`, `monthsForward`. |
+| `list_time_entries` | Individual BurnBar entries over a date range (default last 7 days, max 92), newest first. Params: `from`, `to`. |
 
 ## Use from claude.ai
 

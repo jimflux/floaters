@@ -1,14 +1,15 @@
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
-import { format, subDays, addDays, differenceInCalendarDays, parseISO, isValid } from "date-fns";
+import { format, subDays, differenceInCalendarDays, parseISO, isValid } from "date-fns";
 import { z } from "zod/v4";
-import { entrySeconds, isRunning, localDate, resolveClientLink } from "@/lib/toggl/rollup";
-import { fetchEntries, fetchProjects, fetchClients, fetchLinkOptions } from "@/lib/toggl/store";
-import { togglTimeZone } from "@/lib/toggl/client";
-import type { TimeEntriesResponse, TimeEntry } from "@/types/api";
+import { HOURS_TIME_ZONE, isBurnBarConfigured, readBurnBar } from "@/lib/hours/burnbar";
+import { listEntries, localDate } from "@/lib/hours/rollup";
+import { fetchClientLinks, fetchLinkOptions } from "@/lib/hours/store";
+import type { TimeEntriesResponse } from "@/types/api";
 
-// Raw time entries over a local-date range (inclusive), newest first. For the
-// MCP server and any agent that wants the detail behind the monthly rollup.
+// Raw time entries over a local-date range (inclusive), newest first, read
+// live from BurnBar. For the MCP server and any agent that wants the detail
+// behind the monthly rollup. Nothing before January 2026 is returned.
 
 const MAX_RANGE_DAYS = 92;
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
     const toRaw = dateSchema.safeParse(searchParams.get("to") ?? undefined);
     if (!fromRaw.success || !toRaw.success) return error("from/to must be yyyy-MM-dd");
 
-    const tz = togglTimeZone();
+    const tz = HOURS_TIME_ZONE;
     const now = new Date();
     const to = toRaw.data ?? localDate(now, tz);
     const from = fromRaw.data ?? format(subDays(parseISO(to), 6), "yyyy-MM-dd");
@@ -31,57 +32,18 @@ export async function GET(request: NextRequest) {
     if (differenceInCalendarDays(toDate, fromDate) > MAX_RANGE_DAYS) {
       return error(`Range too wide: at most ${MAX_RANGE_DAYS} days`);
     }
+    if (!isBurnBarConfigured()) return error("BurnBar is not set up on the API", 409);
 
-    // A day of slack either side for the UTC/local offset; filtered below.
-    const [entries, projects, clients, linkOptions] = await Promise.all([
-      fetchEntries(connectionId, subDays(fromDate, 1).toISOString(), addDays(toDate, 2).toISOString()),
-      fetchProjects(connectionId),
-      fetchClients(connectionId),
+    const [burnbar, links, linkOptions] = await Promise.all([
+      readBurnBar(),
+      fetchClientLinks(connectionId),
       fetchLinkOptions(connectionId),
     ]);
-    const projectById = new Map(projects.map((p) => [String(p.toggl_id), p]));
-    const clientById = new Map(clients.map((c) => [String(c.toggl_id), c]));
+    // No stale copy here: this response has nowhere to say the data is old.
+    if (burnbar.error || !burnbar.data) return error(`Could not read BurnBar: ${burnbar.error ?? "unknown error"}`, 502);
 
-    const out: TimeEntry[] = [];
-    let totalSeconds = 0;
-    let billableSeconds = 0;
-    for (const e of entries) {
-      if (e.deleted_at) continue;
-      const day = localDate(e.start, tz);
-      if (day < from || day > to) continue;
-      const project = e.project_id === null || e.project_id === undefined ? undefined : projectById.get(String(e.project_id));
-      const client = project?.toggl_client_id === null || project?.toggl_client_id === undefined
-        ? undefined
-        : clientById.get(String(project.toggl_client_id));
-      const seconds = entrySeconds(e, now);
-      const billable = e.billable === true;
-      totalSeconds += seconds;
-      if (billable) billableSeconds += seconds;
-      out.push({
-        togglId: Number(e.toggl_id),
-        description: e.description ?? null,
-        projectName: project?.name ?? e.project_name ?? null,
-        clientName: client?.name ?? e.client_name ?? null,
-        clientKey: client ? resolveClientLink(client, linkOptions).clientKey : null,
-        start: new Date(e.start).toISOString(),
-        stop: e.stop ? new Date(e.stop).toISOString() : null,
-        durationSeconds: seconds,
-        hours: Math.round((seconds / 3600) * 100) / 100,
-        billable,
-        tags: e.tags ?? [],
-        running: isRunning(e),
-      });
-    }
-    out.sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : 0));
-
-    const response: TimeEntriesResponse = {
-      from,
-      to,
-      timeZone: tz,
-      entries: out,
-      totalHours: Math.round((totalSeconds / 3600) * 100) / 100,
-      billableHours: Math.round((billableSeconds / 3600) * 100) / 100,
-    };
+    const listed = listEntries({ data: burnbar.data, links, linkOptions, from, to, now, timeZone: tz });
+    const response: TimeEntriesResponse = { from, to, timeZone: tz, ...listed };
     return json(response);
   } catch (err) {
     return handleError(err);

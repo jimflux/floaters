@@ -32,6 +32,8 @@ Copy the values from the current Render service / `apps/api/.env`:
 | `JWT_SECRET` | unchanged |
 | `CONNECT_SECRET` | the API key for the MCP server and scripts (`Authorization: Bearer …`). Never given to the web app. |
 | `FLUX_LOGIN_SECRET` | this tool's login.flux.am secret: a reference to `${{flux-login.TOOL_SECRET_FLOATERS}}`. Unset means web sign-in is off and only the API key works. |
+| `BURNBAR_URL` | `https://burn.flux.am`. Optional, with `BURNBAR_READ_TOKEN`: without both, the Hours section says BurnBar isn't set up. |
+| `BURNBAR_READ_TOKEN` | BurnBar's read-only key (its `READ_TOKEN`; works for GET requests only). |
 
 ## 3. Generate a domain
 

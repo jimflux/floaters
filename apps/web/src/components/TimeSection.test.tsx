@@ -99,25 +99,30 @@ describe("TimeSection", () => {
     expect(screen.getByTestId("running-dot")).toHaveAttribute("title", "Timer running: Acme · Retainer · Deck");
   });
 
-  it("explains itself when Toggl is not configured", () => {
+  it("explains itself when BurnBar is not set up", () => {
     renderSection(fixture({ configured: false, clients: [] }));
-    expect(screen.getByText(/Set TOGGL_API_TOKEN/)).toBeInTheDocument();
+    expect(screen.getByText(/Set BURNBAR_URL and BURNBAR_READ_TOKEN/)).toBeInTheDocument();
   });
 
-  it("prompts for a sync when configured but empty", () => {
+  it("says when BurnBar has no hours for the window", () => {
     renderSection(fixture({ clients: [] }));
-    expect(screen.getByText(/No hours synced yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No hours in BurnBar for these months/)).toBeInTheDocument();
+  });
+
+  it("says when BurnBar couldn't be read", () => {
+    renderSection(fixture({ clients: [], syncStatus: "error", syncError: "BurnBar /api/state returned 502" }));
+    expect(screen.getByText(/Couldn't read hours from BurnBar: BurnBar \/api\/state returned 502/)).toBeInTheDocument();
   });
 
   it("renders the header alone while the query is still loading", () => {
     renderSection(undefined);
     expect(screen.getByTestId("hours-header")).toBeInTheDocument();
-    expect(screen.getByText(/Toggl not connected/)).toBeInTheDocument();
+    expect(screen.getByText(/BurnBar isn't set up/)).toBeInTheDocument();
   });
 
   it("opens the panel from the clock button without toggling the section", () => {
     const { onOpenPanel } = renderSection(fixture());
-    screen.getByTitle("Time tracking: sync and client links").click();
+    screen.getByTitle("Time tracking: hours and client links").click();
     expect(onOpenPanel).toHaveBeenCalled();
   });
 });

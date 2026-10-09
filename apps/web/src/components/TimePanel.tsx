@@ -5,11 +5,11 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TimeTrackingResponse } from '@/lib/types';
-import { triggerTimeSync, patchTimeClientLink } from '@/lib/api';
+import { getTimeTracking, patchTimeClientLink } from '@/lib/api';
 import { formatHours } from '@/lib/time';
 
-// Time tracking side panel: sync state, the running timer, today / this week,
-// and the Toggl client -> pipeline client links that put hours next to what
+// Time tracking side panel: when hours were last read from BurnBar, the
+// running timer, today / this week, and the BurnBar client -> pipeline client links that put hours next to what
 // was invoiced.
 
 interface Props {
@@ -49,13 +49,14 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
   const running = time?.running ?? null;
   const elapsed = useElapsed(running?.startedAt ?? null);
 
-  const syncMutation = useMutation({
-    mutationFn: (full: boolean) => triggerTimeSync(full),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['time'] });
-      toast.success('Toggl synced');
+  // Hours are read live; Refresh skips the API's one-minute copy.
+  const refreshMutation = useMutation({
+    mutationFn: () => getTimeTracking(true),
+    onSuccess: data => {
+      queryClient.setQueryData(['time'], data);
+      if (data.syncError) toast.error(`Couldn't read BurnBar: ${data.syncError}`);
     },
-    onError: (err: Error) => toast.error(err.message || 'Toggl sync failed'),
+    onError: (err: Error) => toast.error(err.message || 'Refresh failed'),
   });
 
   const linkMutation = useMutation({
@@ -65,7 +66,7 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
     onError: () => toast.error('Failed to update link'),
   });
 
-  const togglClients = (time?.clients ?? []).filter(c => c.togglClientId !== null);
+  const burnbarClients = (time?.clients ?? []).filter(c => c.togglClientId !== null);
   const linkOptions = time?.linkOptions ?? [];
 
   return (
@@ -77,21 +78,21 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-5">
           {!time?.configured ? (
             <p className="text-xs text-muted-foreground">
-              Toggl is not connected. Set <code className="text-[11px]">TOGGL_API_TOKEN</code> on the API (your personal API token from Toggl profile settings) and redeploy, then sync.
+              BurnBar isn't set up. Set <code className="text-[11px]">BURNBAR_URL</code> and <code className="text-[11px]">BURNBAR_READ_TOKEN</code> (BurnBar's read-only key) on the API and redeploy.
             </p>
           ) : (
             <>
               <div className="flex items-center justify-between gap-3 rounded-tile bg-card p-4">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold">Toggl</p>
+                  <p className="text-sm font-semibold">BurnBar</p>
                   <p className="text-xs text-muted-foreground">
-                    Synced {formatWhen(time.lastSyncedAt)}
-                    {time.syncStatus === 'error' && time.syncError ? ` · last error: ${time.syncError}` : ''}
+                    Updated {formatWhen(time.lastSyncedAt)}
+                    {time.syncStatus === 'error' && time.syncError ? ` · couldn't read BurnBar: ${time.syncError}` : ''}
                   </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => syncMutation.mutate(false)} disabled={syncMutation.isPending}>
-                  <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-                  <span>Sync</span>
+                <Button variant="outline" size="sm" onClick={() => refreshMutation.mutate()} disabled={refreshMutation.isPending}>
+                  <RefreshCw className={`h-3.5 w-3.5 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
                 </Button>
               </div>
 
@@ -120,13 +121,13 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
               <div className="rounded-tile bg-card p-4">
                 <p className="font-display text-base font-extrabold tracking-[-0.01em] mb-1">Client links</p>
                 <p className="text-xs text-muted-foreground mb-2">
-                  Link each Toggl client to its pipeline client so hours sit next to what was invoiced. Names that match are linked automatically.
+                  Link each BurnBar client to its pipeline client so hours sit next to what was invoiced. Names that match are linked automatically.
                 </p>
                 <div className="space-y-2">
-                  {togglClients.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No Toggl clients in the current window.</p>
+                  {burnbarClients.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No BurnBar clients in the current window.</p>
                   )}
-                  {togglClients.map(c => (
+                  {burnbarClients.map(c => (
                     <div key={c.togglClientId!} className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm truncate">{c.clientName}</p>
@@ -152,8 +153,7 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
               </div>
 
               <p className="text-[11px] text-muted-foreground">
-                Hours bucket by their start day in {time.timeZone}. A full re-sync walks the last 12 months:{' '}
-                <button className="font-semibold text-iris-deep underline underline-offset-2 hover:text-foreground" onClick={() => syncMutation.mutate(true)} disabled={syncMutation.isPending}>run one</button>.
+                Hours come straight from BurnBar, starting January 2026, and count on the day they started in {time.timeZone}.
               </p>
             </>
           )}

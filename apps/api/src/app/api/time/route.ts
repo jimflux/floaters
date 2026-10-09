@@ -1,27 +1,22 @@
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
-import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
-import { format, addMonths, subMonths, startOfMonth, subDays } from "date-fns";
+import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { z } from "zod/v4";
 import { HISTORY_MONTHS } from "@/lib/xero/sync";
-import { isTogglConfigured, togglTimeZone } from "@/lib/toggl/client";
-import { rollupTime } from "@/lib/toggl/rollup";
-import {
-  fetchEntries,
-  fetchProjects,
-  fetchClients,
-  fetchState,
-  fetchLinkOptions,
-  fetchInvoicedByClientMonth,
-} from "@/lib/toggl/store";
+import { HOURS_TIME_ZONE, isBurnBarConfigured, loadBurnBar, readBurnBar } from "@/lib/hours/burnbar";
+import { rollupTime } from "@/lib/hours/rollup";
+import { fetchClientLinks, fetchLinkOptions, fetchInvoicedByClientMonth, saveClientLink } from "@/lib/hours/store";
 import type { TimeTrackingResponse } from "@/types/api";
 
-// Hours by Toggl client per month over the same window as the cashflow grid.
-// Context, not cash: nothing here touches the balance walks.
+// Hours by BurnBar client per month over the same window as the cashflow grid,
+// read live from BurnBar. Context, not cash: nothing here touches the balance
+// walks. Hours before January 2026 are never shown.
 
 const querySchema = z.object({
   back: z.coerce.number().int().min(0).max(HISTORY_MONTHS).default(3),
   forward: z.coerce.number().int().min(1).max(24).default(12),
+  // fresh=1 skips the one-minute memory copy (the panel's Refresh button).
+  fresh: z.enum(["0", "1"]).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -31,11 +26,12 @@ export async function GET(request: NextRequest) {
     const parsed = querySchema.safeParse({
       back: searchParams.get("back") ?? undefined,
       forward: searchParams.get("forward") ?? undefined,
+      fresh: searchParams.get("fresh") ?? undefined,
     });
     if (!parsed.success) {
       return error(`Invalid window: back must be 0-${HISTORY_MONTHS}, forward must be 1-24`);
     }
-    const { back, forward } = parsed.data;
+    const { back, forward, fresh } = parsed.data;
 
     const now = new Date();
     const thisMonth = startOfMonth(now);
@@ -47,36 +43,32 @@ export async function GET(request: NextRequest) {
     }
     const currentMonthIndex = months.indexOf(format(thisMonth, "yyyy-MM"));
 
-    // A day of slack on the window start so a late-evening local entry that
-    // is the previous UTC day still buckets correctly.
-    const entriesFrom = subDays(from, 1).toISOString();
-    const [state, entries, projects, clients, linkOptions, invoiced] = await Promise.all([
-      fetchState(connectionId),
-      fetchEntries(connectionId, entriesFrom),
-      fetchProjects(connectionId),
-      fetchClients(connectionId),
+    const configured = isBurnBarConfigured();
+    const [burnbar, links, linkOptions, invoiced] = await Promise.all([
+      configured ? readBurnBar({ fresh: fresh === "1" }) : Promise.resolve({ data: null, error: null }),
+      fetchClientLinks(connectionId),
       fetchLinkOptions(connectionId),
       fetchInvoicedByClientMonth(connectionId, format(from, "yyyy-MM-dd")),
     ]);
 
-    const tz = togglTimeZone();
     const rollup = rollupTime({
-      entries,
-      projects,
-      clients,
+      clients: burnbar.data?.clients ?? [],
+      projects: burnbar.data?.projects ?? [],
+      entries: burnbar.data?.entries ?? [],
+      links,
       months,
       now,
-      timeZone: tz,
+      timeZone: HOURS_TIME_ZONE,
       linkOptions,
       invoicedByClientMonth: invoiced,
     });
 
     const response: TimeTrackingResponse = {
-      configured: isTogglConfigured(),
-      lastSyncedAt: state?.last_synced_at ?? null,
-      syncStatus: state?.sync_status ?? "idle",
-      syncError: state?.sync_error ?? null,
-      timeZone: tz,
+      configured,
+      lastSyncedAt: burnbar.data?.fetchedAt ?? null,
+      syncStatus: burnbar.error ? "error" : "idle",
+      syncError: burnbar.error,
+      timeZone: HOURS_TIME_ZONE,
       months,
       currentMonthIndex,
       clients: rollup.clients,
@@ -92,8 +84,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Link (or unlink) a Toggl client to a pipeline client key. null clears the
-// explicit link, falling back to the name match.
+// Link (or unlink) a BurnBar client to a pipeline client key. null clears the
+// explicit link, falling back to the name match. The field keeps its Toggl-era
+// name so the web and MCP contract is unchanged.
 const patchSchema = z.object({
   togglClientId: z.number().int().positive(),
   clientKey: z.string().min(1).nullable(),
@@ -107,14 +100,19 @@ export async function PATCH(request: NextRequest) {
     if (!parsed.success) return error("Invalid link: togglClientId and clientKey (or null) required", 400);
     const { togglClientId, clientKey } = parsed.data;
 
-    const { data, error: dbError } = await supabase
-      .from("toggl_clients")
-      .update({ client_key: clientKey, updated_at: new Date().toISOString() })
-      .eq("connection_id", connectionId)
-      .eq("toggl_id", togglClientId)
-      .select("toggl_id");
-    if (dbError) return error(`Failed to update link: ${dbError.message}`, 500);
-    if (!data || data.length === 0) return error("Unknown Toggl client; sync first", 404);
+    if (!isBurnBarConfigured()) return error("BurnBar is not set up on the API", 409);
+    let clients;
+    try {
+      clients = (await loadBurnBar()).clients;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      return error(`Could not read BurnBar: ${message}`, 502);
+    }
+    const client = clients.find((c) => c.id === togglClientId);
+    if (!client) return error("Unknown BurnBar client", 404);
+
+    const { error: dbError } = await saveClientLink(connectionId, client, clientKey);
+    if (dbError) return error(`Failed to update link: ${dbError}`, 500);
     return json({ ok: true });
   } catch (err) {
     return handleError(err);
