@@ -42,7 +42,11 @@ npm test               # run every workspace's tests
 ## API architecture (`apps/api`)
 
 ### Auth
-Single-user API-key auth: the web app and MCP server send `Authorization: Bearer <CONNECT_SECRET>`. `getConnectionId()` in `src/lib/auth.ts` checks the key and returns the one connection's id. (The older Xero-OAuth login flow under `src/app/auth/` still exists for connecting Xero.)
+Single user, two ways in, both checked by `authenticate()` in `src/lib/auth.ts` (`requireConnection()` returns the one connection's id):
+- **API key**: `Authorization: Bearer <CONNECT_SECRET>`, compared in constant time. Used by the MCP server, scripts and the remote MCP endpoint's loopback calls. Never given to the web app.
+- **login.flux.am session** (the web app): login.flux.am redirects to `GET /auth/callback?code=…&next=…`; the code is verified with `src/lib/flux-session.js` (a byte-for-byte copy of login.flux.am's, keep it identical) and `FLUX_LOGIN_SECRET` (`typ: 'code'`, `aud` = this host, single-use `n`), then the host-only `__Host-floaters_session` cookie is set for 30 days and the browser goes to `next` (local paths only). `GET /auth/logout` clears it and goes to `https://login.flux.am/logout`. Without `FLUX_LOGIN_SECRET` only the API key works.
+- A cookie-authenticated request must also send `X-Floaters-Client: web` and, if it has an Origin, it must be this site (other flux.am subdomains are third-party hosted and count as same-site). Otherwise 403. There is no CORS: the web app is same-origin.
+- Xero connects as a Custom Connection via `/auth/connect?secret=<CONNECT_SECRET>`; there is no Xero redirect callback.
 
 ### Xero Sync
 `src/lib/xero/sync.ts` — initial + incremental sync, rate-limited to ~54 calls/min via `bottleneck`. Syncs accounts, invoices (ACCREC/ACCPAY), bank transactions, and invoice payments (`xero_payments` — payments are NOT bank transactions in Xero). Incremental invoice syncs include PAID/VOIDED/DELETED status transitions; `POST /api/sync` accepts `{ heal: true }` to re-fetch locally-open invoices by ID. Writes via **batched** `chunkedUpsert()` (500-row chunks) on `(connection_id, xero_id)`. Token refresh is automatic in `src/lib/xero/auth.ts`.
@@ -59,20 +63,19 @@ Hours are context, never cash: nothing under `src/lib/toggl/` touches either bal
 - Routes return JSON via `json()` / `error()` from `src/lib/api-helpers.ts`, which set **`Cache-Control: no-store`** (this is a live financial read — never cache it).
 - Request validation uses Zod v4 (`zod/v4`).
 - Supabase client is a lazy Proxy (`src/lib/supabase.ts`) to avoid build-time env errors.
-- `src/middleware.ts` handles CORS for the web origins.
 
 ### Database
 Key tables: `xero_connections`, `xero_invoices` (carries local columns `expected_payment_date`, `projection_id`, `reviewed_at` — omitted from sync upserts so they survive re-sync), `xero_payments`, `xero_bank_transactions`, `xero_accounts`, `income_projections`, `scenarios`, `scenario_items`, `budgets`, `budget_lines`, `cash_thresholds`, `account_groups`, `hidden_accounts`, `projection_overrides` (costs only since the pipeline cutover), `sync_log`, `toggl_state`, `toggl_clients` (local `client_key` link), `toggl_projects`, `toggl_time_entries`. Migrations in `apps/api/supabase/migrations/`.
 
 ## Web app (`apps/web`)
 
-React Query for data; the cashflow query is `['cashflow']`, hours are `['time']` (an "Hours" section under the grid plus `TimePanel` for sync and client links). Editable projection cells (`src/components/EditableCell.tsx`) use the optimistic-mutation pattern (patch in `onMutate`, roll back in `onError`, invalidate in `onSettled`). API base/key come from `VITE_API_URL` / `VITE_API_KEY`.
+React Query for data; the cashflow query is `['cashflow']`, hours are `['time']` (an "Hours" section under the grid plus `TimePanel` for sync and client links). Editable projection cells (`src/components/EditableCell.tsx`) use the optimistic-mutation pattern (patch in `onMutate`, roll back in `onError`, invalidate in `onSettled`). Requests are same-origin with the session cookie and `X-Floaters-Client: web` (`src/lib/api.ts`); a 401 sends the browser to login.flux.am (`src/lib/session.ts`, with a one-minute loop guard in sessionStorage). Local dev: Vite proxies `/api` and `/auth` to `FLOATERS_DEV_API_URL` (default `http://localhost:3000`) and, if `FLOATERS_DEV_API_KEY` is set, adds the API key in the proxy (never in the bundle).
 
 ## MCP (`packages/mcp-tools`, `apps/mcp`, `/mcp/<secret>`)
 
 Read-only. The tool definitions (`get_cashflow`, `get_income_pipeline`, `get_connection`, `get_forecast`, `list_transactions`, `get_time_tracking`, `list_time_entries`) live in `packages/mcp-tools` (`registerFloatersTools(server, apiGet)`) and are GETs against the API, so no MCP client can mutate anything. Two transports share them:
 - `apps/mcp`: stdio server for OpenClaw. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. esbuild bundles the shared package (only the SDK and zod stay external).
-- `apps/api/src/app/mcp/[secret]/route.ts`: remote Streamable HTTP endpoint (stateless, JSON responses) for claude.ai custom connectors at `https://floaters.flux.am/mcp/<MCP_SECRET>`. The path secret is the whole access control (claude.ai sends no credentials), so `MCP_SECRET` is its own value, never `CONNECT_SECRET` (which ships in the web bundle); unset means 404 everywhere. Tool calls GET the API over loopback with `CONNECT_SECRET` (`src/lib/mcp.ts`).
+- `apps/api/src/app/mcp/[secret]/route.ts`: remote Streamable HTTP endpoint (stateless, JSON responses) for claude.ai custom connectors at `https://floaters.flux.am/mcp/<MCP_SECRET>`. The path secret is the whole access control (claude.ai sends no credentials), so `MCP_SECRET` is its own value, never `CONNECT_SECRET`; unset means 404 everywhere. Tool calls GET the API over loopback with `CONNECT_SECRET` (`src/lib/mcp.ts`).
 See `apps/mcp/README.md` for both setups.
 
 ## Deployment
@@ -81,6 +84,6 @@ API → Railway (always-on; `railway.json` at the root). See `docs/DEPLOY-RAILWA
 
 ## Environment Variables
 
-API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FRONTEND_URL`, `TOGGL_API_TOKEN` (optional; enables time tracking), `TOGGL_WORKSPACE_ID` / `TOGGL_TIMEZONE` (optional), `MCP_SECRET` (optional; enables the remote MCP endpoint).
-Web (`apps/web/.env`): `VITE_API_URL`, `VITE_API_KEY`.
+API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FLUX_LOGIN_SECRET` (enables login.flux.am sign-in), `TOGGL_API_TOKEN` (optional; enables time tracking), `TOGGL_WORKSPACE_ID` / `TOGGL_TIMEZONE` (optional), `MCP_SECRET` (optional; enables the remote MCP endpoint).
+Web (dev only, `apps/web/.env`): `FLOATERS_DEV_API_URL`, `FLOATERS_DEV_API_KEY`. The production web build takes no variables.
 MCP: `FLOATERS_API_URL`, `FLOATERS_API_KEY`.

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getConnectionId } from "./auth";
+import { resolveConnection } from "./auth";
 
 // This is a live financial dashboard read off Supabase on every request — never
 // let a browser or CDN serve a stale body. Without this, the web app's
@@ -18,15 +18,21 @@ export function error(message: string, status = 400): NextResponse {
 }
 
 export async function requireConnection(): Promise<string> {
-  const connectionId = await getConnectionId();
-  if (!connectionId) {
-    throw new AuthError("Not authenticated");
+  const result = await resolveConnection();
+  if (!result.ok) {
+    if (result.status === 503) throw new AuthError("Xero is not connected", 503);
+    throw result.status === 403
+      ? new AuthError("Forbidden", 403)
+      : new AuthError("Not authenticated");
   }
-  return connectionId;
+  return result.connectionId;
 }
 
 export class AuthError extends Error {
-  constructor(message: string) {
+  // 401: no valid credentials. 403: a valid session cookie on a request that
+  // isn't from the web app (missing X-Floaters-Client or a foreign Origin).
+  // 503: authenticated, but there is no Xero connection yet.
+  constructor(message: string, readonly status: 401 | 403 | 503 = 401) {
     super(message);
     this.name = "AuthError";
   }
@@ -34,7 +40,7 @@ export class AuthError extends Error {
 
 export function handleError(err: unknown): NextResponse {
   if (err instanceof AuthError) {
-    return error("Not authenticated", 401);
+    return error(err.message, err.status);
   }
   console.error(err);
   return error("Internal server error", 500);

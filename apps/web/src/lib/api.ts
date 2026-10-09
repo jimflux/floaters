@@ -1,35 +1,38 @@
 import type { CashflowData, AccountGroup, PipelineResponse, TimeTrackingResponse } from './types';
+import { clearSignInGuard, handleUnauthorised } from './session';
 
-// The web app is served by the Next API itself (single service), so by default
-// it talks to the same origin — '' makes requests like `/api/cashflow` relative.
-// For local dev (vite on :8080, api on :3000) set VITE_API_URL=http://localhost:3000.
-// NOTE: VITE_* values are embedded in the client bundle, so the API key is
-// effectively public — this is a single-user app, but don't treat it as a secret.
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
-const API_KEY = import.meta.env.VITE_API_KEY ?? '';
+export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
 
-const headers = { 'Authorization': `Bearer ${API_KEY}` };
-const jsonHeaders = { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' };
+// The web app is served by the Next API itself (single service), so every
+// request is same-origin and authenticated by the login.flux.am session cookie.
+// The X-Floaters-Client header is what lets a cookie-authenticated request in:
+// another flux.am subdomain can send the cookie but can't add the header.
+// For local dev, the Vite server proxies /api and /auth to the API (see
+// vite.config.ts).
+const headers = { 'X-Floaters-Client': 'web' };
+const jsonHeaders = { 'X-Floaters-Client': 'web', 'Content-Type': 'application/json' };
 
-// localStorage warm-start keys, versioned: the response shape broke when
-// income became layered (v2), and a stale pre-break payload hydrating the new
-// UI would crash it — the web build does not typecheck, so the version bump is
-// the only guard. v3 adds the VAT surfaces (vatAdjustedClosing, vatOwedNow, the
-// VAT_LIABILITY cost row); additive, but bumped so a stale v2 payload can't
-// hydrate the VAT-aware UI. v4 adds vatProjectedBill (issued + projected VAT for
-// the VAT cost row on the projected view).
-export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v4';
-export const OVERRIDES_CACHE_KEY = 'projection_overrides_cache_v2';
+function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
+  return fetch(path, {
+    ...init,
+    credentials: 'same-origin',
+    headers: { ...headers, ...init.headers },
+  }).then(res => {
+    if (res.status === 401) return handleUnauthorised();
+    clearSignInGuard();
+    return res;
+  });
+}
 
 export function getCashflow(): Promise<CashflowData> {
-  return fetch(`${API_BASE}/api/cashflow?back=3&forward=12`, { headers }).then(res => {
+  return apiFetch(`/api/cashflow?back=3&forward=12`, { headers }).then(res => {
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return res.json();
   });
 }
 
 export function getPipeline(): Promise<PipelineResponse> {
-  return fetch(`${API_BASE}/api/pipeline`, { headers }).then(res => {
+  return apiFetch(`/api/pipeline`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Pipeline fetch failed: ${res.status}`);
     return res.json();
   });
@@ -38,14 +41,14 @@ export function getPipeline(): Promise<PipelineResponse> {
 // --- Time tracking (Toggl) ---
 // Same window as the cashflow query so the Hours section lines up with the grid.
 export function getTimeTracking(): Promise<TimeTrackingResponse> {
-  return fetch(`${API_BASE}/api/time?back=3&forward=12`, { headers }).then(res => {
+  return apiFetch(`/api/time?back=3&forward=12`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Time tracking fetch failed: ${res.status}`);
     return res.json();
   });
 }
 
 export function triggerTimeSync(full = false): Promise<void> {
-  return fetch(`${API_BASE}/api/time/sync`, {
+  return apiFetch(`/api/time/sync`, {
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify({ full }),
@@ -60,7 +63,7 @@ export function triggerTimeSync(full = false): Promise<void> {
 // Link a Toggl client to a pipeline client key; null clears the explicit
 // link and falls back to the name match.
 export function patchTimeClientLink(togglClientId: number, clientKey: string | null): Promise<void> {
-  return fetch(`${API_BASE}/api/time`, {
+  return apiFetch(`/api/time`, {
     method: 'PATCH',
     headers: jsonHeaders,
     body: JSON.stringify({ togglClientId, clientKey }),
@@ -70,13 +73,13 @@ export function patchTimeClientLink(togglClientId: number, clientKey: string | n
 }
 
 export function triggerSync(): Promise<void> {
-  return fetch(`${API_BASE}/api/sync`, { method: 'POST', headers }).then(res => {
+  return apiFetch(`/api/sync`, { method: 'POST', headers }).then(res => {
     if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
   });
 }
 
 export function hideAccount(accountCode: string): Promise<void> {
-  return fetch(`${API_BASE}/api/hidden-accounts`, {
+  return apiFetch(`/api/hidden-accounts`, {
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify({ accountCode }),
@@ -86,7 +89,7 @@ export function hideAccount(accountCode: string): Promise<void> {
 }
 
 export function unhideAccount(accountCode: string): Promise<void> {
-  return fetch(`${API_BASE}/api/hidden-accounts?accountCode=${encodeURIComponent(accountCode)}`, {
+  return apiFetch(`/api/hidden-accounts?accountCode=${encodeURIComponent(accountCode)}`, {
     method: 'DELETE',
     headers,
   }).then(res => {
@@ -95,14 +98,14 @@ export function unhideAccount(accountCode: string): Promise<void> {
 }
 
 export function getAccountGroups(): Promise<{ groups: AccountGroup[] }> {
-  return fetch(`${API_BASE}/api/account-groups`, { headers }).then(res => {
+  return apiFetch(`/api/account-groups`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Fetch groups failed: ${res.status}`);
     return res.json();
   });
 }
 
 export function createAccountGroup(name: string, accountCodes: string[]): Promise<void> {
-  return fetch(`${API_BASE}/api/account-groups`, {
+  return apiFetch(`/api/account-groups`, {
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify({ name, accountCodes }),
@@ -112,7 +115,7 @@ export function createAccountGroup(name: string, accountCodes: string[]): Promis
 }
 
 export function deleteAccountGroup(id: string): Promise<void> {
-  return fetch(`${API_BASE}/api/account-groups?id=${encodeURIComponent(id)}`, {
+  return apiFetch(`/api/account-groups?id=${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers,
   }).then(res => {
@@ -127,7 +130,7 @@ export interface VatSettings {
 }
 
 export function getVatSettings(): Promise<VatSettings> {
-  return fetch(`${API_BASE}/api/vat`, { headers }).then(res => {
+  return apiFetch(`/api/vat`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Fetch VAT settings failed: ${res.status}`);
     return res.json();
   });
@@ -142,7 +145,7 @@ export interface VatPatch {
 }
 
 export function patchVat(patch: VatPatch): Promise<void> {
-  return fetch(`${API_BASE}/api/vat`, {
+  return apiFetch(`/api/vat`, {
     method: 'PATCH',
     headers: jsonHeaders,
     body: JSON.stringify(patch),
@@ -161,14 +164,14 @@ export interface ProjectionOverrideEntry {
 // the current month blends cash-to-date with the override, so the stored
 // amount can't be recovered from the cell value.
 export function getProjectionOverrides(): Promise<{ overrides: ProjectionOverrideEntry[] }> {
-  return fetch(`${API_BASE}/api/projection-overrides`, { headers }).then(res => {
+  return apiFetch(`/api/projection-overrides`, { headers }).then(res => {
     if (!res.ok) throw new Error(`Fetch overrides failed: ${res.status}`);
     return res.json();
   });
 }
 
 export function setProjectionOverride(accountCode: string, month: string, amount: number): Promise<void> {
-  return fetch(`${API_BASE}/api/projection-overrides`, {
+  return apiFetch(`/api/projection-overrides`, {
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify({ accountCode, month, amount }),
@@ -190,7 +193,7 @@ export interface ProjectionInput {
 }
 
 export function createProjection(input: ProjectionInput): Promise<void> {
-  return fetch(`${API_BASE}/api/projections`, {
+  return apiFetch(`/api/projections`, {
     method: 'POST',
     headers: jsonHeaders,
     body: JSON.stringify(input),
@@ -200,7 +203,7 @@ export function createProjection(input: ProjectionInput): Promise<void> {
 }
 
 export function updateProjection(id: string, patch: Partial<ProjectionInput>): Promise<void> {
-  return fetch(`${API_BASE}/api/projections/${encodeURIComponent(id)}`, {
+  return apiFetch(`/api/projections/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: jsonHeaders,
     body: JSON.stringify(patch),
@@ -210,7 +213,7 @@ export function updateProjection(id: string, patch: Partial<ProjectionInput>): P
 }
 
 export function deleteProjection(id: string): Promise<void> {
-  return fetch(`${API_BASE}/api/projections/${encodeURIComponent(id)}`, {
+  return apiFetch(`/api/projections/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers,
   }).then(res => {
@@ -225,7 +228,7 @@ export function reviewInvoice(
   invoiceId: string,
   body: { projectionId?: string | null; reviewed?: boolean }
 ): Promise<void> {
-  return fetch(`${API_BASE}/api/adjustments/${encodeURIComponent(invoiceId)}`, {
+  return apiFetch(`/api/adjustments/${encodeURIComponent(invoiceId)}`, {
     method: 'PATCH',
     headers: jsonHeaders,
     body: JSON.stringify(body),
@@ -235,7 +238,7 @@ export function reviewInvoice(
 }
 
 export function removeProjectionOverride(accountCode: string, month: string): Promise<void> {
-  return fetch(`${API_BASE}/api/projection-overrides?accountCode=${encodeURIComponent(accountCode)}&month=${encodeURIComponent(month)}`, {
+  return apiFetch(`/api/projection-overrides?accountCode=${encodeURIComponent(accountCode)}&month=${encodeURIComponent(month)}`, {
     method: 'DELETE',
     headers,
   }).then(res => {

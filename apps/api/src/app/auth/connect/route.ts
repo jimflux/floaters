@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getClientCredentialsToken, getXeroConnections } from "@/lib/xero/auth";
 import { supabase } from "@/lib/supabase";
 import { runSync } from "@/lib/xero/sync";
+import { connectSecretMatches } from "@/lib/auth";
 
 /**
  * Connects to Xero via Custom Connection (client_credentials).
@@ -9,14 +10,14 @@ import { runSync } from "@/lib/xero/sync";
  * Usage: GET /auth/connect?secret=YOUR_CONNECT_SECRET
  *
  * No cookies/sessions — just stores the Xero connection in DB.
- * All subsequent API calls use Authorization: Bearer <CONNECT_SECRET>.
+ * API calls then use Authorization: Bearer <CONNECT_SECRET> or a login.flux.am session.
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const secret = searchParams.get("secret");
 
-    if (!secret || secret !== process.env.CONNECT_SECRET) {
+    if (!connectSecretMatches(secret)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

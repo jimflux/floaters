@@ -3,9 +3,8 @@ import type { ApiGet } from "@floaters/mcp-tools";
 
 // Remote MCP endpoint support. The endpoint lives at /mcp/<MCP_SECRET>: the
 // secret in the path is the whole access control (claude.ai custom connectors
-// send no credentials), so it must be its own value, never CONNECT_SECRET,
-// which ships inside the web bundle. With MCP_SECRET unset the endpoint does
-// not exist (404 for every path).
+// send no credentials), so it must be its own value, never CONNECT_SECRET.
+// With MCP_SECRET unset the endpoint does not exist (404 for every path).
 
 export function mcpSecretMatches(candidate: string): boolean {
   const expected = process.env.MCP_SECRET?.trim();
