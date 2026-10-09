@@ -71,8 +71,8 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:w-[440px] p-0 flex flex-col">
-        <SheetHeader className="px-6 pt-6 pb-2">
-          <SheetTitle className="text-sm font-semibold">Time tracking</SheetTitle>
+        <SheetHeader className="px-6 pt-6 pb-3">
+          <SheetTitle>Time tracking</SheetTitle>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-5">
           {!time?.configured ? (
@@ -81,9 +81,9 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
             </p>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-tile bg-card p-4">
                 <div className="min-w-0">
-                  <p className="text-sm">Toggl</p>
+                  <p className="text-sm font-semibold">Toggl</p>
                   <p className="text-xs text-muted-foreground">
                     Synced {formatWhen(time.lastSyncedAt)}
                     {time.syncStatus === 'error' && time.syncError ? ` · last error: ${time.syncError}` : ''}
@@ -91,7 +91,7 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
                 </div>
                 <Button variant="outline" size="sm" onClick={() => syncMutation.mutate(false)} disabled={syncMutation.isPending}>
                   <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-                  <span className="ml-1.5">Sync</span>
+                  <span>Sync</span>
                 </Button>
               </div>
 
@@ -100,10 +100,10 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
                 <Stat label="This week" value={formatHours(time.weekHours) || '0h'} />
               </div>
 
-              <div className="rounded-md border border-border px-3 py-2">
+              <div className="rounded-tile bg-card px-4 py-3">
                 {running ? (
                   <div className="flex items-start gap-2">
-                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse shrink-0" />
+                    <span className="mt-1.5 dot bg-mint animate-pulse" />
                     <div className="min-w-0">
                       <p className="text-sm truncate">{running.description || 'No description'}</p>
                       <p className="text-xs text-muted-foreground truncate">
@@ -117,8 +117,8 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
                 )}
               </div>
 
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Client links</p>
+              <div className="rounded-tile bg-card p-4">
+                <p className="font-display text-base font-extrabold tracking-[-0.01em] mb-1">Client links</p>
                 <p className="text-xs text-muted-foreground mb-2">
                   Link each Toggl client to its pipeline client so hours sit next to what was invoiced. Names that match are linked automatically.
                 </p>
@@ -136,7 +136,7 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
                       </div>
                       <select
                         aria-label={`Pipeline client for ${c.clientName}`}
-                        className="h-8 max-w-[190px] rounded-md border border-input bg-background px-2 text-xs"
+                        className="h-9 max-w-[190px] rounded-[10px] border-2 border-input bg-white px-2 text-xs"
                         value={c.linkSource === 'manual' ? c.clientKey ?? '' : ''}
                         disabled={linkMutation.isPending}
                         onChange={e => linkMutation.mutate({ togglClientId: c.togglClientId!, clientKey: e.target.value || null })}
@@ -153,7 +153,7 @@ export default function TimePanel({ open, onOpenChange, time }: Props) {
 
               <p className="text-[11px] text-muted-foreground">
                 Hours bucket by their start day in {time.timeZone}. A full re-sync walks the last 12 months:{' '}
-                <button className="underline" onClick={() => syncMutation.mutate(true)} disabled={syncMutation.isPending}>run one</button>.
+                <button className="font-semibold text-iris-deep underline underline-offset-2 hover:text-foreground" onClick={() => syncMutation.mutate(true)} disabled={syncMutation.isPending}>run one</button>.
               </p>
             </>
           )}
@@ -169,9 +169,9 @@ function nameFor(options: Array<{ clientKey: string; clientName: string }>, key:
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border px-3 py-2">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold tabular-nums">{value}</p>
+    <div className="rounded-tile bg-card px-4 py-3">
+      <p className="text-xs font-semibold text-muted-foreground">{label}</p>
+      <p className="stat-value">{value}</p>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import type { IncomeSection as IncomeSectionData, PipelineResponse } from '@/lib/types';
+import { cellTone, LAYER_DOT } from '@/lib/brand';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -55,15 +56,15 @@ export default function IncomeSection({
   return (
     <>
       <tr
-        className="border-b border-border cursor-pointer hover:bg-muted/20 border-l-section-income border-l-2"
+        className="border-b border-border cursor-pointer hover:bg-muted/20"
         onClick={onToggle}
       >
-        <td className="sticky left-0 z-10 bg-card px-3 py-2 text-xs font-semibold">
+        <td className="sticky left-0 z-10 bg-card px-3 py-2.5 font-display text-sm font-extrabold tracking-[-0.01em] shadow-[inset_4px_0_0_hsl(var(--section-income))]">
           <div className="flex items-center gap-1">
             {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
             <span>↗ Income</span>
             <button
-              className="ml-1 p-0.5 rounded hover:bg-accent/50 transition-colors"
+              className="ml-1 h-6 w-6 inline-flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud transition-colors"
               onClick={e => { e.stopPropagation(); onAddProjection(); }}
               title="Add projection"
             >
@@ -76,7 +77,7 @@ export default function IncomeSection({
           return (
             <td
               key={m}
-              className={`px-3 py-2 text-right text-xs font-semibold tabular-nums ${total < 0 ? 'text-destructive' : ''} ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+              className={`px-3 py-2.5 text-right text-xs font-bold tabular-nums ${cellTone(total, i === currentMonthIndex)}`}
             >
               {formatGBP(total)}
             </td>
@@ -86,9 +87,9 @@ export default function IncomeSection({
 
       {open && (
         <>
-          <LayerRow label="Paid" dotClass="bg-green-500" values={income.totals.paid} months={months} currentMonthIndex={currentMonthIndex} />
-          <LayerRow label="Invoiced" dotClass="bg-blue-500" values={income.totals.invoiced} months={months} currentMonthIndex={currentMonthIndex} />
-          <LayerRow label="Projected" dotClass="bg-amber-400" values={income.totals.projected} months={months} currentMonthIndex={currentMonthIndex} italic />
+          <LayerRow label="Paid" dotClass={LAYER_DOT.paid} values={income.totals.paid} months={months} currentMonthIndex={currentMonthIndex} />
+          <LayerRow label="Invoiced" dotClass={LAYER_DOT.invoiced} values={income.totals.invoiced} months={months} currentMonthIndex={currentMonthIndex} />
+          <LayerRow label="Projected" dotClass={LAYER_DOT.projected} values={income.totals.projected} months={months} currentMonthIndex={currentMonthIndex} italic />
 
           {income.clients.length === 0 ? (
             <tr className="border-b border-border">
@@ -114,15 +115,15 @@ export default function IncomeSection({
                     return (
                       <td
                         key={m}
-                        className={`relative px-3 py-1.5 text-right text-xs tabular-nums ${c.monthly[i] < 0 ? 'text-destructive' : ''} ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+                        className={`relative px-3 py-1.5 text-right text-xs tabular-nums ${cellTone(c.monthly[i], i === currentMonthIndex)}`}
                         title={cellTitle(c.paid[i], c.invoiced[i], c.projected[i], isOverdue, hasUnreviewed)}
                       >
                         {c.monthly[i] !== 0 ? formatGBP(c.monthly[i]) : ''}
                         {isOverdue && (
-                          <span data-testid="overdue-dot" className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-red-500" />
+                          <span data-testid="overdue-dot" className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-coral ring-1 ring-aubergine" />
                         )}
                         {hasUnreviewed && (
-                          <span data-testid="unreviewed-dot" className="absolute top-0.5 right-2.5 h-1.5 w-1.5 rounded-full bg-blue-500" />
+                          <span data-testid="unreviewed-dot" className="absolute top-0.5 right-3 h-1.5 w-1.5 rounded-full bg-iris ring-1 ring-aubergine" />
                         )}
                       </td>
                     );
@@ -159,14 +160,14 @@ function LayerRow({ label, dotClass, values, months, currentMonthIndex, italic =
     <tr className="border-b border-border bg-row-summary" data-testid={`layer-${label.toLowerCase()}`}>
       <td className="sticky left-0 z-10 bg-row-summary px-3 py-1 text-xs pl-7">
         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-          <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+          <span className={`dot ${dotClass}`} />
           {label}
         </span>
       </td>
       {months.map((m, i) => (
         <td
           key={m}
-          className={`px-3 py-1 text-right text-xs tabular-nums text-muted-foreground ${italic ? 'italic' : ''} ${values[i] < 0 ? 'text-destructive' : ''} ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+          className={`px-3 py-1 text-right text-xs tabular-nums text-muted-foreground ${italic ? 'italic' : ''} ${cellTone(values[i], i === currentMonthIndex)}`}
         >
           {values[i] !== 0 ? formatGBP(values[i]) : ''}
         </td>

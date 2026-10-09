@@ -34,23 +34,23 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
   return (
     <>
       <tr
-        className="border-b border-border cursor-pointer hover:bg-muted/20 border-l-section-hours border-l-2"
+        className="border-b border-border cursor-pointer hover:bg-muted/20"
         onClick={onToggle}
         data-testid="hours-header"
       >
-        <td className="sticky left-0 z-10 bg-card px-3 py-2 text-xs font-semibold">
+        <td className="sticky left-0 z-10 bg-card px-3 py-2.5 font-display text-sm font-extrabold tracking-[-0.01em] shadow-[inset_4px_0_0_hsl(var(--section-hours))]">
           <div className="flex items-center gap-1">
             {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
             <span>⏱ Hours</span>
             {running && (
               <span
                 data-testid="running-dot"
-                className="ml-1 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse"
+                className="ml-1.5 dot bg-mint animate-pulse"
                 title={`Timer running: ${[running.clientName, running.projectName, running.description].filter(Boolean).join(' · ') || 'no description'}`}
               />
             )}
             <button
-              className="ml-1 p-0.5 rounded hover:bg-accent/50 transition-colors"
+              className="ml-1 h-6 w-6 inline-flex items-center justify-center rounded-full bg-cloud hover:bg-aubergine hover:text-cloud transition-colors"
               onClick={e => { e.stopPropagation(); onOpenPanel(); }}
               title="Time tracking: sync and client links"
             >
@@ -63,7 +63,7 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
           return (
             <td
               key={m}
-              className={`px-3 py-2 text-right text-xs font-semibold tabular-nums ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
+              className={`px-3 py-2.5 text-right text-xs font-bold tabular-nums ${i === currentMonthIndex ? 'bg-col-highlight' : ''}`}
               title={total ? `${formatHours(total)} worked · ${formatHours(billableFor(m)) || '0h'} billable` : ''}
             >
               {formatHours(total)}
@@ -77,14 +77,14 @@ export default function TimeSection({ time, months, currentMonthIndex, open, onT
           {!configured ? (
             <MessageRow months={months} text="Toggl not connected. Set TOGGL_API_TOKEN on the API to pull hours." />
           ) : clients.length === 0 ? (
-            <MessageRow months={months} text="No hours synced yet. Sync Now pulls the last 12 months from Toggl." />
+            <MessageRow months={months} text="No hours synced yet. Sync now pulls the last 12 months from Toggl." />
           ) : (
             <>
               {anyBillable && (
               <tr className="border-b border-border bg-row-summary" data-testid="layer-billable">
                 <td className="sticky left-0 z-10 bg-row-summary px-3 py-1 text-xs pl-7">
                   <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                    <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                    <span className="dot bg-mint" />
                     Billable
                   </span>
                 </td>

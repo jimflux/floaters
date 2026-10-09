@@ -36,11 +36,11 @@ export default function AccountManagementPanel({ open, onOpenChange, accounts, v
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:w-[440px] p-0 flex flex-col">
-        <SheetHeader className="px-6 pt-6 pb-2">
-          <SheetTitle className="text-sm font-semibold">Account Management</SheetTitle>
+        <SheetHeader className="px-6 pt-6 pb-3">
+          <SheetTitle>Account management</SheetTitle>
         </SheetHeader>
         <Tabs defaultValue="accounts" className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="mx-6 mb-2">
+          <TabsList className="mx-6 mb-2 self-start">
             <TabsTrigger value="accounts" className="text-xs">Accounts</TabsTrigger>
             <TabsTrigger value="groups" className="text-xs">Groups</TabsTrigger>
             <TabsTrigger value="vat" className="text-xs">VAT</TabsTrigger>
@@ -88,9 +88,9 @@ function VatTab({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between py-1.5">
+      <div className="flex items-center justify-between gap-4 rounded-tile bg-card p-4">
         <div className="min-w-0">
-          <p className="text-sm">Enable VAT</p>
+          <p className="text-sm font-semibold">Enable VAT</p>
           <p className="text-xs text-muted-foreground">Accrue output VAT and show the quarterly bill</p>
         </div>
         <Switch
@@ -100,22 +100,22 @@ function VatTab({
         />
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-muted-foreground px-1">
         Standard accrual, 20%. Quarters end May, Aug, Nov, Feb; paid ~1 month + 7 days after.
       </p>
 
       {enabled && (
         <>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">VATable clients</p>
-            <div className="space-y-1">
+          <div className="rounded-tile bg-card p-4">
+            <p className="font-display text-base font-extrabold tracking-[-0.01em] mb-2">VATable clients</p>
+            <div className="divide-y divide-border">
               {vatClients.length === 0 && (
                 <p className="text-xs text-muted-foreground">No clients in the current view.</p>
               )}
               {vatClients.map(c => {
                 const checked = c.vatable ?? overrideFor(c.clientKey) ?? true;
                 return (
-                  <div key={c.clientKey} className="flex items-center justify-between py-1.5">
+                  <div key={c.clientKey} className="flex items-center justify-between gap-3 py-2">
                     <p className="text-sm truncate">{c.clientName}</p>
                     <Switch
                       checked={checked}
@@ -129,7 +129,7 @@ function VatTab({
           </div>
 
           {vatCurrentQuarter && (
-            <label className="flex items-center gap-2 py-1.5 cursor-pointer">
+            <label className="flex items-center gap-2.5 rounded-tile bg-card p-4 cursor-pointer">
               <Checkbox
                 checked={vatCurrentQuarter.paid}
                 disabled={mutate.isPending}
@@ -161,7 +161,7 @@ function AccountsTab({
   // meaningful visibility toggle.
   return (
     <div className="space-y-4">
-      <AccountSection label="Cost Accounts" accounts={costAccounts} queryClient={queryClient} />
+      <AccountSection label="Cost accounts" accounts={costAccounts} queryClient={queryClient} />
     </div>
   );
 }
@@ -174,9 +174,9 @@ function AccountSection({
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   return (
-    <div>
-      <p className="text-xs font-medium text-muted-foreground mb-2">{label}</p>
-      <div className="space-y-1">
+    <div className="rounded-tile bg-card p-4">
+      <p className="font-display text-base font-extrabold tracking-[-0.01em] mb-2">{label}</p>
+      <div className="divide-y divide-border">
         {accounts.map(account => (
           <AccountToggleRow key={account.code} account={account} queryClient={queryClient} />
         ))}
@@ -200,7 +200,7 @@ function AccountToggleRow({
   });
 
   return (
-    <div className="flex items-center justify-between py-1.5">
+    <div className="flex items-center justify-between gap-3 py-2">
       <div className="min-w-0">
         <p className="text-sm truncate">{account.name}</p>
         <p className="text-xs text-muted-foreground">{account.code}</p>
@@ -243,11 +243,11 @@ function GroupsTab({
     <div className="space-y-3">
       {isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
       {groups.map(group => (
-        <div key={group.id} className="border border-border rounded-md p-3">
+        <div key={group.id} className="bg-card rounded-tile p-4">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-sm font-medium">{group.name}</p>
+            <p className="text-sm font-semibold">{group.name}</p>
             <Button
-              variant="ghost" size="icon" className="h-7 w-7"
+              variant="ghost" size="icon" className="h-9 w-9" aria-label="Delete group"
               onClick={() => deleteMutation.mutate(group.id)}
               disabled={deleteMutation.isPending}
             >
@@ -271,7 +271,7 @@ function GroupsTab({
         />
       ) : (
         <Button variant="outline" size="sm" className="w-full" onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1.5" /> Create Group
+          <Plus className="h-3.5 w-3.5" /> Create group
         </Button>
       )}
     </div>
@@ -303,7 +303,7 @@ function CreateGroupForm({
   };
 
   return (
-    <div className="border border-border rounded-md p-3 space-y-3">
+    <div className="bg-card rounded-tile p-4 space-y-3">
       <Input
         placeholder="Group name"
         value={name}

@@ -14,8 +14,8 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+        sans: ['var(--font-text)'],
+        display: ['var(--font-display)'],
       },
       fontSize: {
         'xxs': '11px',
@@ -24,6 +24,27 @@ export default {
         'base': '14px',
       },
       colors: {
+        aubergine: "hsl(var(--aubergine))",
+        cloud: "hsl(var(--cloud))",
+        iris: {
+          DEFAULT: "hsl(var(--iris))",
+          deep: "hsl(var(--iris-deep))",
+          light: "hsl(var(--iris-light))",
+        },
+        mint: {
+          DEFAULT: "hsl(var(--mint))",
+          light: "hsl(var(--mint-light))",
+        },
+        sun: {
+          DEFAULT: "hsl(var(--sun))",
+          light: "hsl(var(--sun-light))",
+        },
+        coral: {
+          DEFAULT: "hsl(var(--coral))",
+          light: "hsl(var(--coral-light))",
+        },
+        "muted-on-aubergine": "hsl(var(--muted-on-aubergine))",
+        override: "hsl(var(--override))",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -82,6 +103,8 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        card: "var(--radius-card)",
+        tile: "var(--radius-tile)",
       },
       keyframes: {
         "accordion-down": {
