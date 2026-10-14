@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
-import { retirementScenarioId } from "@/lib/retirement";
+import { isRetirementScenarioId } from "@/lib/retirement";
 
 const updateItemSchema = z.object({
   type: z.enum(["income", "expense"]).optional(),
@@ -14,7 +14,7 @@ const updateItemSchema = z.object({
 });
 
 async function ownsBusinessScenario(connectionId: string, id: string): Promise<boolean> {
-  if (id === retirementScenarioId(connectionId)) return false;
+  if (isRetirementScenarioId(connectionId, id)) return false;
   const { data, error: dbError } = await supabase
     .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
   return !dbError && !!data;

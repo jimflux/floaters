@@ -16,7 +16,7 @@ import {
   isAfter,
 } from "date-fns";
 import type { ForecastPeriod, DayTransaction } from "@/types/forecast";
-import { retirementScenarioId } from "@/lib/retirement";
+import { isRetirementScenarioId } from "@/lib/retirement";
 
 interface ScenarioItemRow {
   id: string;
@@ -71,7 +71,7 @@ export async function computeForecast(
 
   // 4. Get scenario items if requested
   let scenarioItems: ScenarioItemRow[] = [];
-  const businessScenarioIds = scenarioIds?.filter(id => id !== retirementScenarioId(connectionId));
+  const businessScenarioIds = scenarioIds?.filter(id => !isRetirementScenarioId(connectionId, id));
   if (businessScenarioIds && businessScenarioIds.length > 0) {
     const { data: items } = await supabase
       .from("scenario_items")
@@ -276,7 +276,7 @@ export async function getDayTransactions(
   }
 
   // Scenario items
-  const businessScenarioIds = scenarioIds?.filter(id => id !== retirementScenarioId(connectionId));
+  const businessScenarioIds = scenarioIds?.filter(id => !isRetirementScenarioId(connectionId, id));
   if (businessScenarioIds && businessScenarioIds.length > 0) {
     const { data: items } = await supabase
       .from("scenario_items")

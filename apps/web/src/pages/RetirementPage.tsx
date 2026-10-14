@@ -43,6 +43,7 @@ export default function RetirementPage() {
   const [example, setExample] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(false);
+  const [saveSignInRequired, setSaveSignInRequired] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -104,14 +105,14 @@ export default function RetirementPage() {
   const save = async () => {
     if (!plan || !valid || saving || importing) return;
     const submitted = structuredClone(plan);
-    setSaving(true); setSaveError(false); setSaveSuccess(false);
+    setSaving(true); setSaveError(false); setSaveSignInRequired(false); setSaveSuccess(false);
     try {
       const result = await saveRetirementPlan(submitted);
       setSavedFingerprint(JSON.stringify(submitted));
       setSavedAt(result.savedAt);
       setExample(false);
       setSaveSuccess(true);
-    } catch { setSaveError(true); }
+    } catch (error) { setSaveError(true); setSaveSignInRequired(error instanceof SignInRequiredError); }
     finally { setSaving(false); }
   };
   const importFile = async (event: ChangeEvent<HTMLInputElement>, kind: 'workbook' | 'json') => {
@@ -160,7 +161,7 @@ export default function RetirementPage() {
       {loadError && <div role="alert" className={`${CARD} space-y-3`}><p>Could not load your saved plan. Retry before importing or saving.</p>
         {signInRequired && <a href={loginUrl()} className="font-semibold underline">Sign in</a>}
         <Button onClick={() => setLoadAttempt(value => value + 1)}>Retry loading</Button></div>}
-      {ready && plan && <>
+      {ready && plan && <fieldset disabled={importing} className="min-w-0 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
           <p className="font-semibold">{dirty ? 'Unsaved changes' : 'Saved'}{savedAt && <span className="ml-2 font-normal text-muted-foreground">{new Date(savedAt).toLocaleString('en-GB')}</span>}</p>
           <p className="text-muted-foreground">Imports stay on this device until you choose Save plan.</p>
@@ -168,7 +169,10 @@ export default function RetirementPage() {
         {example && <p className="rounded-tile bg-sun/20 p-4 text-sm">Example plan — invented values for illustration. Edit or import your own inputs; this example is unsaved.</p>}
         {saving && <p role="status">Saving your submitted plan… You can keep editing.</p>}
         {saveSuccess && <p role="status">{dirty ? 'Saved snapshot. Your later edits are still unsaved changes.' : 'Plan saved.'}</p>}
-        {saveError && <p role="alert" className="rounded-tile bg-destructive/10 p-3">Could not save your plan. Your draft is preserved; choose Save plan to retry.</p>}
+        {saveError && <div role="alert" className="rounded-tile bg-destructive/10 p-3">
+          {saveSignInRequired ? <p>Your session expired. Your draft is still here. <a className="font-semibold underline" href={loginUrl()} target="_blank" rel="noreferrer">Sign in in a new tab</a>, then choose Save plan again. You can also export your draft.</p>
+            : <p>Could not save your plan. Your draft is preserved; choose Save plan to retry.</p>}
+        </div>}
         {importing && <p role="status">Importing file…</p>}
         {importError && <p role="alert" className="rounded-tile bg-destructive/10 p-3">{importError}</p>}
         {!!warnings.length && <div className="rounded-tile bg-sun/20 p-4"><h2 className="font-semibold">Review imported inputs</h2><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
@@ -258,7 +262,7 @@ export default function RetirementPage() {
           <p>This model does not calculate National Insurance, capital gains tax, dividend tax, ISA contribution limits or property liquidation. Return cases are illustrations and do not estimate the probability of an outcome.</p>
           <p className="flex flex-wrap gap-x-5 gap-y-2"><a className="font-semibold text-aubergine underline" href="https://www.gov.uk/income-tax-rates" target="_blank" rel="noreferrer">Income tax rates</a><a className="font-semibold text-aubergine underline" href="https://www.gov.uk/tax-on-your-private-pension/lump-sum-allowance" target="_blank" rel="noreferrer">Pension tax-free allowance</a><a className="font-semibold text-aubergine underline" href="https://www.gov.uk/hmrc-internal-manuals/pensions-tax-manual/ptm028000" target="_blank" rel="noreferrer">Pension access age guidance</a></p>
         </div></section>
-      </>}
+      </fieldset>}
     </div>
   </main>;
 }

@@ -28,7 +28,9 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
   if (bytes.length > MAX_RETIREMENT_FILE_BYTES) throw new Error('Workbook must be smaller than 5 MB.');
   let expanded = 0;
   const extract = (names: Set<string>) => {
+    let visited = 0;
     const entries = unzipSync(bytes, { filter: entry => {
+      if (++visited > 1000) throw new Error('Workbook contains too many archive entries.');
       if (!names.has(entry.name)) return false;
       expanded += entry.originalSize;
       if (entry.originalSize > MAX_ENTRY_BYTES || expanded > MAX_EXPANDED_BYTES) throw new Error('Workbook expands beyond the import limit.');

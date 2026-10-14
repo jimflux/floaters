@@ -1,5 +1,6 @@
 import type { CashflowData, AccountGroup, PipelineResponse, TimeTrackingResponse } from './types';
-import { clearSignInGuard, handleUnauthorised } from './session';
+import { clearSignInGuard, handleUnauthorised, SignInRequiredError } from './session';
+import { clearCachedData } from './cache';
 import type { RetirementPlan, RetirementSavedPlan } from '@floaters/types';
 
 export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
@@ -21,21 +22,26 @@ export function getRetirementPlan(): Promise<RetirementSavedPlan> {
 }
 
 export function saveRetirementPlan(plan: RetirementPlan): Promise<RetirementSavedPlan> {
+  // A failed save must not navigate away from an unsaved plan.
   return apiFetch('/api/retirement', {
     method: 'PUT', headers: jsonHeaders, body: JSON.stringify(plan),
-  }).then(res => {
+  }, false).then(res => {
     if (!res.ok) throw new Error('Could not save your retirement plan. Your draft is still here.');
     return res.json();
   });
 }
 
-function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
+function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, redirectOnUnauthorised = true): Promise<Response> {
   return fetch(path, {
     ...init,
     credentials: 'same-origin',
     headers: { ...headers, ...init.headers },
   }).then(res => {
-    if (res.status === 401) return handleUnauthorised();
+    if (res.status === 401) {
+      if (redirectOnUnauthorised) return handleUnauthorised();
+      clearCachedData();
+      throw new SignInRequiredError();
+    }
     clearSignInGuard();
     return res;
   });

@@ -1,8 +1,13 @@
 import { NextRequest } from 'next/server';
+import { z } from 'zod/v4';
 import { retirementPlanErrors, type RetirementPlan, type RetirementSavedPlan } from '@floaters/types';
 import { AuthError, error, handleError, json, requireConnection } from '@/lib/api-helpers';
 import { supabase } from '@/lib/supabase';
 import { parseRetirementDescription, retirementDescription, retirementScenarioId, RETIREMENT_BODY_LIMIT } from '@/lib/retirement';
+
+const retirementPlanSchema = z.unknown().superRefine((value, context) => {
+  for (const message of retirementPlanErrors(value)) context.addIssue({ code: 'custom', message });
+}).transform(value => value as RetirementPlan);
 
 class BodyError extends Error {
   constructor(message: string, readonly status: 400 | 413) { super(message); }
@@ -60,9 +65,9 @@ export async function PUT(request: NextRequest) {
   try {
     const connectionId = await requireConnection();
     const body = await readBody(request);
-    const errors = retirementPlanErrors(body);
-    if (errors.length) return json({ error: 'Invalid retirement plan', details: errors }, 400);
-    const plan = body as RetirementPlan;
+    const parsed = retirementPlanSchema.safeParse(body);
+    if (!parsed.success) return json({ error: 'Invalid retirement plan', details: parsed.error.issues.map(issue => issue.message) }, 400);
+    const plan = parsed.data;
     const savedAt = new Date().toISOString();
     const { error: dbError } = await supabase.from('scenarios').upsert({
       id: retirementScenarioId(connectionId),

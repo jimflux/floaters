@@ -16,6 +16,11 @@ export function retirementScenarioId(connectionId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// PostgreSQL UUID inputs may use upper case, braces or alternate hyphen groups.
+export function isRetirementScenarioId(connectionId: string, id: string): boolean {
+  return id.replace(/[{}-]/g, '').toLowerCase() === retirementScenarioId(connectionId).replaceAll('-', '');
+}
+
 export function retirementDescription(plan: RetirementPlan): string {
   return JSON.stringify({ kind: KIND, version: 1, plan });
 }

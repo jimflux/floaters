@@ -63,6 +63,14 @@ function fixture(): RetirementPlan {
 }
 const request = (body: unknown, headers?: Record<string, string>) => new NextRequest('http://localhost/api/retirement', { method: 'PUT', body: typeof body === 'string' ? body : JSON.stringify(body), headers });
 const params = (id: string, itemId = 'item-a') => ({ params: Promise.resolve({ id, itemId }) });
+const uuidSpellings = ['canonical', 'uppercase', 'compact', 'braced', 'grouped'] as const;
+function uuidSpelling(id: string, spelling: typeof uuidSpellings[number]): string {
+  if (spelling === 'uppercase') return id.toUpperCase();
+  if (spelling === 'compact') return id.replaceAll('-', '');
+  if (spelling === 'braced') return `{${id}}`;
+  if (spelling === 'grouped') return id.replaceAll('-', '').match(/.{4}/g)!.join('-');
+  return id;
+}
 
 beforeEach(() => {
   state.connection = 'connection-a'; state.authenticated = true; state.rows = []; state.items = []; state.calls = []; state.failure = '';
@@ -175,8 +183,8 @@ describe('reserved scenario isolation', () => {
     const response = await listScenarios();
     expect((await response.json()).map((row: { id: string }) => row.id)).toEqual(['normal']);
   });
-  it('rejects all generic detail and item routes before reading or modifying a reserved record', async () => {
-    const id = retirementScenarioId(state.connection);
+  it.each(uuidSpellings)('rejects all generic detail and item routes for a reserved UUID spelling (%s)', async spelling => {
+    const id = uuidSpelling(retirementScenarioId(state.connection), spelling);
     const input = request({ amount: 10 });
     const responses = [await getScenario(input, params(id)), await patchScenario(input, params(id)), await deleteScenario(input, params(id)), await postItem(input, params(id)), await patchItem(input, params(id)), await deleteItem(input, params(id))];
     expect(responses.map(response => response.status)).toEqual([404, 404, 404, 404, 404, 404]);
@@ -207,8 +215,8 @@ describe('reserved scenario isolation', () => {
     expect((await deleteItem(request({}), params('owned'))).status).toBe(200);
     expect(state.items).toEqual([]);
   });
-  it('drops an explicitly requested reserved id from both legacy forecasts', async () => {
-    const id = retirementScenarioId(state.connection);
+  it.each(uuidSpellings)('drops a reserved UUID spelling from both legacy forecasts (%s)', async spelling => {
+    const id = uuidSpelling(retirementScenarioId(state.connection), spelling);
     const periods = await computeForecast(state.connection, 'daily', '2026-10-14', '2026-10-14', [id]);
     const transactions = await getDayTransactions(state.connection, '2026-10-14', [id]);
     expect(periods[0].scenarioInflows).toBeUndefined();

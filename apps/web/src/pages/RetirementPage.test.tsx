@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExampleRetirementPlan } from '@/lib/retirement';
-import type { RetirementSavedPlan } from '@floaters/types';
 import { SignInRequiredError } from '@/lib/session';
+import type { RetirementSavedPlan } from '@floaters/types';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), workbook: vi.fn(), json: vi.fn() }));
 vi.mock('@/lib/api', () => ({ getRetirementPlan: mocks.get, saveRetirementPlan: mocks.save }));
@@ -85,6 +85,35 @@ describe('RetirementPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
     await screen.findByText('Plan saved.');
     expect(mocks.save).toHaveBeenCalledTimes(2);
+  });
+  it('preserves the draft on session expiry and supports signing in in another tab', async () => {
+    mocks.save.mockRejectedValueOnce(new SignInRequiredError());
+    await ready();
+    edit('You name', 'Keep this draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    const link = await screen.findByRole('link', { name: 'Sign in in a new tab' });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(screen.getByLabelText('You name')).toHaveValue('Keep this draft');
+    expect(screen.getByRole('button', { name: 'Export JSON' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+  });
+  it('locks editable controls while an asynchronous import replaces the plan', async () => {
+    let resolve!: (value: ArrayBuffer) => void;
+    const read = vi.fn(() => new Promise<ArrayBuffer>(done => { resolve = done; }));
+    const file = new File(['synthetic workbook'], 'example.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: read });
+    const imported = createExampleRetirementPlan();
+    imported.people[0].name = 'Imported example';
+    mocks.workbook.mockReturnValue({ plan: imported, warnings: [] });
+    await ready();
+    fireEvent.change(screen.getByLabelText('Workbook file'), { target: { files: [file] } });
+    await waitFor(() => expect(read).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText('You name')).toBeDisabled();
+    expect(screen.getByLabelText('You cash balance')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add income' })).toBeDisabled();
+    await act(async () => { resolve(new ArrayBuffer(4)); });
+    expect(await screen.findByDisplayValue('Imported example')).toBeEnabled();
   });
   it('retains edits made during a pending save as unsaved', async () => {
     let resolve!: (value: RetirementSavedPlan) => void;

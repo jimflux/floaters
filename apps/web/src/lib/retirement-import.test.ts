@@ -48,6 +48,26 @@ describe('retirement workbook import', () => {
     const bomb = zipSync({ 'xl/workbook.xml': strToU8(' '.repeat(8 * 1024 * 1024 + 1)) }).buffer as ArrayBuffer;
     expect(() => importRetirementWorkbook(bomb)).toThrow('import limit');
   });
+  it('bounds every visited archive entry including malformed ZIP64 directories', () => {
+    const archive = new Uint8Array(98);
+    const view = new DataView(archive.buffer);
+    view.setUint32(0, 0x06064b50, true);
+    view.setUint32(32, 0xffffffff, true);
+    view.setUint32(48, 98, true);
+    view.setUint32(56, 0x07064b50, true);
+    view.setUint32(76, 0x06054b50, true);
+    view.setUint16(84, 1, true);
+    expect(() => importRetirementWorkbook(archive.buffer)).toThrow('import limit');
+  });
+  it('bounds cumulative expanded XML across selected sheets', () => {
+    const files = unzipSync(new Uint8Array(workbook()));
+    for (const name of ['input', 'assumptions', 'oneoff']) {
+      const path = `xl/worksheets/${name}.xml`;
+      const xml = strFromU8(files[path]);
+      files[path] = strToU8(xml + ' '.repeat(8 * 1024 * 1024 - files[path].length));
+    }
+    expect(() => importRetirementWorkbook(zipSync(files).buffer as ArrayBuffer)).toThrow('import limit');
+  });
   it('rejects invalid archives', () => expect(() => importRetirementWorkbook(new ArrayBuffer(8))).toThrow());
 });
 

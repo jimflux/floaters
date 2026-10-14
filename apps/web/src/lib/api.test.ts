@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { getCashflow, patchVat, triggerSync, CASHFLOW_CACHE_KEY } from "./api";
+import { getCashflow, patchVat, triggerSync, CASHFLOW_CACHE_KEY, saveRetirementPlan, getRetirementPlan } from "./api";
 import { SignInRequiredError } from "./session";
+
+import { createExampleRetirementPlan } from './retirement';
 
 const fetchMock = vi.fn();
 const assign = vi.fn();
@@ -82,6 +84,28 @@ describe("api requests", () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
     void getCashflow();
     await vi.waitFor(() => expect(assign).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('retirement API requests', () => {
+  it('loads and saves the plain plan with the authenticated web contract', async () => {
+    const plan = createExampleRetirementPlan();
+    const saved = { plan, savedAt: '2026-10-14T12:00:00Z' };
+    fetchMock.mockImplementation(async () => ok(saved));
+    expect(await getRetirementPlan()).toEqual(saved);
+    expect(await saveRetirementPlan(plan)).toEqual(saved);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/retirement');
+    const [url, init] = fetchMock.mock.calls[1];
+    expect(url).toBe('/api/retirement');
+    expect(init).toMatchObject({ method: 'PUT', credentials: 'same-origin', headers: { 'X-Floaters-Client': 'web', 'Content-Type': 'application/json' } });
+    expect(JSON.parse(init.body)).toEqual(plan);
+  });
+  it('rejects an expired-session save without navigating away from the unsaved draft', async () => {
+    localStorage.setItem(CASHFLOW_CACHE_KEY, '{}');
+    fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+    await expect(saveRetirementPlan(createExampleRetirementPlan())).rejects.toBeInstanceOf(SignInRequiredError);
+    expect(assign).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CASHFLOW_CACHE_KEY)).toBeNull();
   });
 });
 
