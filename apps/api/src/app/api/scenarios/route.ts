@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
+import { retirementScenarioId } from "@/lib/retirement";
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -16,6 +17,7 @@ export async function GET() {
       .from("scenarios")
       .select("*, scenario_items(*)")
       .eq("connection_id", connectionId)
+      .neq("id", retirementScenarioId(connectionId))
       .order("created_at", { ascending: false });
 
     return json(data || []);

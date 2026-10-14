@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
+import { isRetirementScenarioId } from "@/lib/retirement";
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
@@ -16,6 +17,7 @@ export async function GET(
   try {
     const connectionId = await requireConnection();
     const { id } = await params;
+    if (isRetirementScenarioId(connectionId, id)) return error("Scenario not found", 404);
 
     const { data } = await supabase
       .from("scenarios")
@@ -38,6 +40,7 @@ export async function PATCH(
   try {
     const connectionId = await requireConnection();
     const { id } = await params;
+    if (isRetirementScenarioId(connectionId, id)) return error("Scenario not found", 404);
     const body = await request.json();
 
     const parsed = updateSchema.safeParse(body);
@@ -67,6 +70,7 @@ export async function DELETE(
   try {
     const connectionId = await requireConnection();
     const { id } = await params;
+    if (isRetirementScenarioId(connectionId, id)) return error("Scenario not found", 404);
 
     await supabase
       .from("scenarios")
