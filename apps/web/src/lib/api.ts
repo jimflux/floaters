@@ -1,5 +1,6 @@
 import type { CashflowData, AccountGroup, PipelineResponse, TimeTrackingResponse } from './types';
 import { clearSignInGuard, handleUnauthorised } from './session';
+import type { RetirementPlan, RetirementSavedPlan } from '@floaters/types';
 
 export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
 
@@ -11,6 +12,22 @@ export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
 // vite.config.ts).
 const headers = { 'X-Floaters-Client': 'web' };
 const jsonHeaders = { 'X-Floaters-Client': 'web', 'Content-Type': 'application/json' };
+
+export function getRetirementPlan(): Promise<RetirementSavedPlan> {
+  return apiFetch('/api/retirement').then(res => {
+    if (!res.ok) throw new Error('Could not load your saved retirement plan.');
+    return res.json();
+  });
+}
+
+export function saveRetirementPlan(plan: RetirementPlan): Promise<RetirementSavedPlan> {
+  return apiFetch('/api/retirement', {
+    method: 'PUT', headers: jsonHeaders, body: JSON.stringify(plan),
+  }).then(res => {
+    if (!res.ok) throw new Error('Could not save your retirement plan. Your draft is still here.');
+    return res.json();
+  });
+}
 
 function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
   return fetch(path, {

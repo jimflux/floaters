@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
+import { retirementScenarioId } from "@/lib/retirement";
 
 const createItemSchema = z.object({
   type: z.enum(["income", "expense"]),
@@ -19,6 +20,7 @@ export async function POST(
   try {
     const connectionId = await requireConnection();
     const { id } = await params;
+    if (id === retirementScenarioId(connectionId)) return error("Scenario not found", 404);
 
     // Verify scenario belongs to this connection
     const { data: scenario } = await supabase

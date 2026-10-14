@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { requireConnection, json, error, handleError } from "@/lib/api-helpers";
 import { NextRequest } from "next/server";
 import { z } from "zod/v4";
+import { retirementScenarioId } from "@/lib/retirement";
 
 const updateItemSchema = z.object({
   type: z.enum(["income", "expense"]).optional(),
@@ -17,8 +18,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
   try {
-    await requireConnection();
-    const { itemId } = await params;
+    const connectionId = await requireConnection();
+    const { id, itemId } = await params;
+    if (id === retirementScenarioId(connectionId)) return error("Scenario not found", 404);
+    const { data: scenario, error: parentError } = await supabase
+      .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
+    if (parentError || !scenario) return error("Scenario not found", 404);
 
     const body = await request.json();
     const parsed = updateItemSchema.safeParse(body);
@@ -28,6 +33,7 @@ export async function PATCH(
       .from("scenario_items")
       .update(parsed.data)
       .eq("id", itemId)
+      .eq("scenario_id", id)
       .select()
       .single();
 
@@ -43,10 +49,15 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; itemId: string }> }
 ) {
   try {
-    await requireConnection();
-    const { itemId } = await params;
+    const connectionId = await requireConnection();
+    const { id, itemId } = await params;
+    if (id === retirementScenarioId(connectionId)) return error("Scenario not found", 404);
+    const { data: scenario, error: parentError } = await supabase
+      .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
+    if (parentError || !scenario) return error("Scenario not found", 404);
 
-    await supabase.from("scenario_items").delete().eq("id", itemId);
+    const { error: dbError } = await supabase.from("scenario_items").delete().eq("id", itemId).eq("scenario_id", id);
+    if (dbError) return error("Could not delete item", 500);
     return json({ ok: true });
   } catch (err) {
     return handleError(err);

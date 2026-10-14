@@ -16,6 +16,7 @@ import {
   isAfter,
 } from "date-fns";
 import type { ForecastPeriod, DayTransaction } from "@/types/forecast";
+import { retirementScenarioId } from "@/lib/retirement";
 
 interface ScenarioItemRow {
   id: string;
@@ -70,11 +71,13 @@ export async function computeForecast(
 
   // 4. Get scenario items if requested
   let scenarioItems: ScenarioItemRow[] = [];
-  if (scenarioIds && scenarioIds.length > 0) {
+  const businessScenarioIds = scenarioIds?.filter(id => id !== retirementScenarioId(connectionId));
+  if (businessScenarioIds && businessScenarioIds.length > 0) {
     const { data: items } = await supabase
       .from("scenario_items")
-      .select("*, scenarios!inner(name, is_active)")
-      .in("scenario_id", scenarioIds);
+      .select("*, scenarios!inner(name, is_active, connection_id)")
+      .eq("scenarios.connection_id", connectionId)
+      .in("scenario_id", businessScenarioIds);
 
     scenarioItems = (items || []).map((item) => ({
       id: item.id,
@@ -273,11 +276,13 @@ export async function getDayTransactions(
   }
 
   // Scenario items
-  if (scenarioIds && scenarioIds.length > 0) {
+  const businessScenarioIds = scenarioIds?.filter(id => id !== retirementScenarioId(connectionId));
+  if (businessScenarioIds && businessScenarioIds.length > 0) {
     const { data: items } = await supabase
       .from("scenario_items")
-      .select("*, scenarios!inner(name)")
-      .in("scenario_id", scenarioIds);
+      .select("*, scenarios!inner(name, connection_id)")
+      .eq("scenarios.connection_id", connectionId)
+      .in("scenario_id", businessScenarioIds);
 
     for (const item of items || []) {
       const occurrences = getOccurrences(
