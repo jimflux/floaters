@@ -4,6 +4,7 @@
 export interface CashflowAccount {
   accountCode: string;
   accountName: string;
+  excluded?: boolean; // temporary exclusion affects future amounts only
   monthly: number[]; // one per month, same order as months[]
   isProjected: boolean[]; // true if the month is a projection
   hasOverride: boolean[]; // true if the month has a manual projection override
@@ -23,6 +24,7 @@ export interface CashflowAccountInfo {
 export interface IncomeClient {
   clientKey: string; // explicit rollup key: "contact:<id>" | "label:<normalised>" | "UNASSIGNED"
   clientName: string; // display only, never a key
+  excluded?: boolean;
   monthly: number[]; // paid + invoiced + projected per month (grid client row)
   paid: number[];
   invoiced: number[];
@@ -48,6 +50,8 @@ export interface CashflowResponse {
   currentBalance: number;
   fallsBelowZeroIn: string | null; // committed; format string-matched by the web
   optimisticFallsBelowZeroIn: string | null;
+  fallsBelowZeroMonth?: string | null; // yyyy-MM; all known events, then ongoing average costs
+  optimisticFallsBelowZeroMonth?: string | null;
   currentMonthIndex: number;
   months: string[]; // ["2025-12", "2026-01", ...]
   income: IncomeSection;

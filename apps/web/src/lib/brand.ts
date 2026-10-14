@@ -32,3 +32,14 @@ export const LAYER_DOT = {
   invoiced: 'bg-iris',
   projected: 'bg-sun',
 } as const;
+
+
+export function zeroDateLabel(month: string | null | undefined, relative: string | null): string {
+  if (month) {
+    const [year, m] = month.split('-').map(Number);
+    return new Date(year, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }
+  return relative || 'No depletion at current spending';
+}
+
+export const RUNWAY_DESCRIPTION = 'Estimated crossing month. Includes all known future income and costs, then continues the current average spending after the last projection. Monthly data cannot determine an exact day.';

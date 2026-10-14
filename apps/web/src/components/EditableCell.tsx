@@ -59,19 +59,19 @@ export default function EditableCell({
   // reopened before the save round-trip settles.
   type MonthPatch = { index: number; month: string; amount: number };
   type OverridesCache = { overrides: ProjectionOverrideEntry[] };
-  type Snapshot = { previous?: CashflowData; previousOverrides?: OverridesCache };
+  type Snapshot = { previous?: [readonly unknown[], CashflowData | undefined][]; previousOverrides?: OverridesCache };
   const applyOptimisticOverride = async (patches: MonthPatch[]): Promise<Snapshot> => {
     await queryClient.cancelQueries({ queryKey: ['cashflow'] });
     await queryClient.cancelQueries({ queryKey: ['projection-overrides'] });
-    const previous = queryClient.getQueryData<CashflowData>(['cashflow']);
+    const previous = queryClient.getQueriesData<CashflowData>({ queryKey: ['cashflow'] });
     const previousOverrides = queryClient.getQueryData<OverridesCache>(['projection-overrides']);
-    queryClient.setQueryData<CashflowData>(['cashflow'], (old) => {
+    queryClient.setQueriesData<CashflowData>({ queryKey: ['cashflow'] }, (old) => {
       if (!old) return old;
       // Overrides are costs-only since the income pipeline: income is client
       // rows, not account rows, and never carries overrides.
       const patchAccounts = (accounts: CashflowAccount[]) =>
         accounts.map(a => {
-          if (a.accountCode !== accountCode) return a;
+          if (a.accountCode !== accountCode || a.excluded) return a;
           const monthly = [...a.monthly];
           const hasOverride = [...(a.hasOverride || a.monthly.map(() => false))];
           for (const { index, amount } of patches) {
@@ -98,7 +98,7 @@ export default function EditableCell({
   };
 
   const rollback = (ctx: Snapshot | undefined) => {
-    if (ctx?.previous) queryClient.setQueryData(['cashflow'], ctx.previous);
+    for (const [key, value] of ctx?.previous ?? []) queryClient.setQueryData(key, value);
     if (ctx?.previousOverrides) queryClient.setQueryData(['projection-overrides'], ctx.previousOverrides);
   };
 

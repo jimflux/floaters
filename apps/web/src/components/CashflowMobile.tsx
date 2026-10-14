@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { triggerSync, getPipeline } from '@/lib/api';
 import type { CashflowData, CashflowAccount, IncomeSection, PipelineResponse, TimeTrackingResponse } from '@/lib/types';
@@ -15,7 +15,7 @@ import ForecastViewToggle from '@/components/ForecastViewToggle';
 import TimePanel from '@/components/TimePanel';
 import { formatHours, monthIndexer } from '@/lib/time';
 import { useForecastView } from '@/hooks/use-forecast-view';
-import { moneyTone, zeroChip, LAYER_DOT } from '@/lib/brand';
+import { moneyTone, zeroChip, zeroDateLabel, RUNWAY_DESCRIPTION, LAYER_DOT } from '@/lib/brand';
 import FluxMark from '@/components/FluxMark';
 
 const SECONDARY_STROKE_COMMITTED = 'hsl(var(--iris))';
@@ -52,9 +52,10 @@ interface Props {
   overrideAmounts?: Map<string, number>;
   // Hours from BurnBar (see CashflowPage); absent hides the block.
   time?: TimeTrackingResponse;
+  rowControls?: ReactNode;
 }
 
-export default function CashflowMobile({ data, overrideAmounts = new Map(), time }: Props) {
+export default function CashflowMobile({ data, overrideAmounts = new Map(), time, rowControls }: Props) {
   const queryClient = useQueryClient();
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
 
@@ -68,6 +69,9 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
     : committedOpening;
   const primaryFallsBelow = projected ? optimisticFallsBelowZeroIn : fallsBelowZeroIn;
   const secondaryFallsBelow = projected ? fallsBelowZeroIn : optimisticFallsBelowZeroIn;
+  const primaryZeroMonth = projected ? data.optimisticFallsBelowZeroMonth : data.fallsBelowZeroMonth;
+  const secondaryZeroMonth = projected ? data.fallsBelowZeroMonth : data.optimisticFallsBelowZeroMonth;
+  const displayCashOut = cashOut.map(a => projected && a.accountCode === 'VAT_LIABILITY' && vatProjectedBill ? { ...a, monthly: vatProjectedBill } : a);
   const secondaryFallsLabel = projected ? 'Cash only (committed)' : 'If projections land';
 
   const [activeIdx, setActiveIdx] = useState(currentMonthIndex);
@@ -159,17 +163,17 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
             <p className="text-xs font-semibold text-muted-foreground mb-1">Today's balance</p>
             <p className={`font-display text-[34px] font-extrabold leading-none tracking-[-0.04em] tabular-nums ${currentBalance < 0 ? 'money-neg rounded-md px-1 -mx-1' : ''}`}>{formatGBP(currentBalance)}</p>
           </div>
-          <ForecastViewToggle view={view} onChange={setView} />
+          <div className="flex flex-col gap-2 items-end">{rowControls}<ForecastViewToggle view={view} onChange={setView} /></div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-muted-foreground">Drops below £0:</span>
-          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-sm font-bold ${zeroChip(primaryFallsBelow)}`}>
+          <span title={RUNWAY_DESCRIPTION} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-sm font-bold ${zeroChip(primaryFallsBelow)}`}>
             {primaryFallsBelow ? <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
-            {primaryFallsBelow || 'Never'}
+            {zeroDateLabel(primaryZeroMonth, primaryFallsBelow)}
           </span>
         </div>
         {secondaryFallsBelow !== primaryFallsBelow && (
-          <p className="text-xs text-muted-foreground mt-1.5">{secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}</p>
+          <p className="text-xs text-muted-foreground mt-1.5">{secondaryFallsLabel}: {zeroDateLabel(secondaryZeroMonth, secondaryFallsBelow)}</p>
         )}
         {vatOwedNow != null && (
           <div className="mt-1.5 flex items-baseline gap-2">
@@ -262,29 +266,22 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
         <div className="h-3 bg-card" />
         <SectionHeaderMobile
           label="↘ Costs"
-          total={sumMonthly(cashOut, activeIdx)}
+          total={sumMonthly(displayCashOut, activeIdx)}
           open={costsOpen}
           onToggle={() => setCostsOpen(!costsOpen)}
           accent="shadow-[inset_4px_0_0_hsl(var(--section-costs))]"
         />
-        {costsOpen && cashOut.map((account, idx) => {
-          // Projected view shows issued + projected VAT in the VAT row (matches
-          // the projected line); committed view keeps issued-only.
-          const displayAccount = projected && account.accountCode === 'VAT_LIABILITY' && vatProjectedBill
-            ? { ...account, monthly: vatProjectedBill }
-            : account;
-          return (
-            <AccountRowMobile
-              key={account.accountCode}
-              account={displayAccount}
-              monthIndex={activeIdx}
-              months={months}
-              currentMonthIndex={currentMonthIndex}
-              isAlt={idx % 2 === 1}
-              overrideAmounts={overrideAmounts}
-            />
-          );
-        })}
+        {costsOpen && displayCashOut.map((account, idx) => (
+          <AccountRowMobile
+            key={account.accountCode}
+            account={account}
+            monthIndex={activeIdx}
+            months={months}
+            currentMonthIndex={currentMonthIndex}
+            isAlt={idx % 2 === 1}
+            overrideAmounts={overrideAmounts}
+          />
+        ))}
 
         {/* Net + Ending */}
         <SummaryRowMobile label={projected ? 'Net cash movement (projected)' : 'Net cash movement'} value={primaryNet[activeIdx]} bold colored />
@@ -424,11 +421,12 @@ function SectionHeaderMobile({ label, total, open, onToggle, accent }: {
 function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAlt, overrideAmounts }: {
   account: CashflowAccount; monthIndex: number; months: string[]; currentMonthIndex: number; isAlt: boolean; overrideAmounts: Map<string, number>;
 }) {
-  const readOnly = account.accountCode === 'VAT_LIABILITY';
+  const calculated = account.accountCode === 'VAT_LIABILITY';
+  const readOnly = calculated || (account.excluded && monthIndex >= currentMonthIndex);
   return (
     <div className={`flex items-center justify-between px-4 py-2.5 border-b border-border min-h-[44px] ${isAlt ? 'bg-row-alt' : ''}`}>
       <span className="text-xs pl-3 truncate pr-3 flex-1">
-        {account.accountName}
+        {account.accountName}{account.excluded && <span className="ml-1 text-muted-foreground">(excluded)</span>}
         {readOnly && <span className="ml-1 inline-flex align-[-1px] text-muted-foreground" title="Calculated automatically"><Lock className="h-3 w-3" role="img" aria-label="Calculated automatically" /></span>}
       </span>
       <div className="shrink-0 min-w-[80px] text-right">

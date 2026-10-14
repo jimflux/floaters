@@ -17,11 +17,12 @@ import EditableCell from '@/components/EditableCell';
 import AlignedChart, { COL_WIDTH } from '@/components/AlignedChart';
 import CashflowMobile from '@/components/CashflowMobile';
 import ForecastViewToggle from '@/components/ForecastViewToggle';
+import ForecastRows, { type ForecastExclusions } from '@/components/ForecastRows';
 import TimeSection from '@/components/TimeSection';
 import TimePanel from '@/components/TimePanel';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useForecastView } from '@/hooks/use-forecast-view';
-import { cellTone, zeroChip } from '@/lib/brand';
+import { cellTone, zeroChip, zeroDateLabel, RUNWAY_DESCRIPTION } from '@/lib/brand';
 import FluxMark from '@/components/FluxMark';
 
 const SECONDARY_STROKE_COMMITTED = 'hsl(var(--iris))'; // iris: optimistic as the secondary line
@@ -62,21 +63,25 @@ export default function CashflowPage() {
   const [hoursOpen, setHoursOpen] = useState(true);
   const [timeOpen, setTimeOpen] = useState(false);
   const [view, setView] = useForecastView();
+  const [exclusions, setExclusions] = useState<ForecastExclusions>({ costs: [], clients: [] });
+  const hasExclusions = exclusions.costs.length + exclusions.clients.length > 0;
 
   const { data, isLoading, isError, error } = useQuery<CashflowData>({
-    queryKey: ['cashflow'],
+    queryKey: hasExclusions ? ['cashflow', exclusions] : ['cashflow'],
     queryFn: async () => {
-      const result = await getCashflow();
-      try { localStorage.setItem(CASHFLOW_CACHE_KEY, JSON.stringify(result)); } catch { /* cache is best-effort */ }
+      const result = await getCashflow(exclusions);
+      try { if (!hasExclusions) localStorage.setItem(CASHFLOW_CACHE_KEY, JSON.stringify(result)); } catch { /* cache is best-effort */ }
       return result;
     },
     initialData: () => {
+      if (hasExclusions) return undefined;
       try {
         const cached = localStorage.getItem(CASHFLOW_CACHE_KEY);
         return cached ? JSON.parse(cached) : undefined;
       } catch { return undefined; }
     },
     initialDataUpdatedAt: 0, // always refetch in background
+    placeholderData: previous => previous,
   });
 
   // Item-level pipeline data: feeds the unreviewed badges and (via the panel)
@@ -145,7 +150,8 @@ export default function CashflowPage() {
   );
   if (!data) return null;
 
-  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} time={time} />;
+  const rowControls = <ForecastRows data={data} exclusions={exclusions} onChange={setExclusions} />;
+  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} time={time} rowControls={rowControls} />;
 
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
   const currentMonth = months[currentMonthIndex];
@@ -164,6 +170,9 @@ export default function CashflowPage() {
     : committedOpening;
   const primaryFallsBelow = projected ? optimisticFallsBelowZeroIn : fallsBelowZeroIn;
   const secondaryFallsBelow = projected ? fallsBelowZeroIn : optimisticFallsBelowZeroIn;
+  const primaryZeroMonth = projected ? data.optimisticFallsBelowZeroMonth : data.fallsBelowZeroMonth;
+  const secondaryZeroMonth = projected ? data.fallsBelowZeroMonth : data.optimisticFallsBelowZeroMonth;
+  const displayCashOut = cashOut.map(a => projected && a.accountCode === 'VAT_LIABILITY' && vatProjectedBill ? { ...a, monthly: vatProjectedBill } : a);
   const secondaryFallsLabel = projected ? 'Cash only (committed)' : 'If projections land';
 
   const minTotalWidth = LABEL_WIDTH + months.length * COL_WIDTH;
@@ -180,6 +189,7 @@ export default function CashflowPage() {
         </span>
         <div className="flex items-center gap-2.5">
           {lastSync && <span className="text-xs text-muted-on-aubergine mr-1">Synced {formatTimeAgo(lastSync)}</span>}
+          {rowControls}
           <ForecastViewToggle view={view} onChange={setView} tone="dark" />
           <Button variant="outline" size="sm" className={`relative ${HEADER_BUTTON}`} onClick={() => setPipelineOpen(true)} title="Income pipeline">
             <Inbox className="h-3.5 w-3.5" />
@@ -220,10 +230,10 @@ export default function CashflowPage() {
                 </div>
                 <div className="rounded-tile bg-cloud px-3.5 py-3">
                   <p className="text-xs font-semibold text-muted-foreground mb-1.5">Drops below £0</p>
-                  <ZeroChip value={primaryFallsBelow} />
+                  <ZeroChip value={primaryFallsBelow} month={primaryZeroMonth} />
                   {secondaryFallsBelow !== primaryFallsBelow && (
                     <p className="text-xs text-muted-foreground mt-1.5">
-                      {secondaryFallsLabel}: {secondaryFallsBelow || 'Never'}
+                      {secondaryFallsLabel}: {zeroDateLabel(secondaryZeroMonth, secondaryFallsBelow)}
                     </p>
                   )}
                 </div>
@@ -289,17 +299,10 @@ export default function CashflowPage() {
                 <tr><td colSpan={months.length + 1} className="h-3 border-0 bg-card" /></tr>
 
                 {/* Costs section */}
-                <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={cashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
-                {costsOpen && cashOut.map((account, idx) => {
-                  // On the projected view the VAT row shows issued + projected VAT
-                  // (matches the projected balance line); committed view keeps issued-only.
-                  const displayAccount = projected && account.accountCode === 'VAT_LIABILITY' && vatProjectedBill
-                    ? { ...account, monthly: vatProjectedBill }
-                    : account;
-                  return (
-                    <AccountRow key={account.accountCode} account={displayAccount} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
-                  );
-                })}
+                <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={displayCashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
+                {costsOpen && displayCashOut.map((account, idx) => (
+                  <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
+                ))}
 
                 {/* Net cash movement: committed never includes hope; projected
                     adds unfulfilled projection remainders. */}
@@ -391,13 +394,14 @@ function AccountRow({ account, months, currentMonthIndex, rowIndex, overrideAmou
     <tr className={`border-b border-border hover:bg-muted/10 ${isAlt ? 'bg-row-alt' : ''}`}>
       <td className={`sticky left-0 z-10 px-3 py-1.5 text-xs pl-7 truncate ${isAlt ? 'bg-row-alt' : 'bg-card'}`}>
         {account.accountName}
+        {account.excluded && <span className="ml-1 text-muted-foreground">(excluded)</span>}
         {readOnly && <span className="ml-1 inline-flex align-[-1px] text-muted-foreground" title="Calculated automatically from your VAT settings"><Lock className="h-3 w-3" role="img" aria-label="Calculated automatically" /></span>}
       </td>
       {months.map((m, i) =>
-        readOnly ? (
+        readOnly || (account.excluded && i >= currentMonthIndex) ? (
           <td
             key={m}
-            title="VAT is calculated automatically"
+            title={account.excluded ? "Future amounts temporarily excluded" : "VAT cash plus calculated unpaid remainder"}
             className={`px-3 py-1.5 text-right text-xs tabular-nums text-muted-foreground cursor-default ${cellTone(account.monthly[i] ?? 0, i === currentMonthIndex)}`}
           >
             {account.monthly[i] ? formatGBP(account.monthly[i]) : ''}
@@ -498,13 +502,13 @@ function StatusScreen({ children }: { children: ReactNode }) {
 
 // "Drops below £0" as a chip whose fill tracks urgency; the words and icon
 // carry the meaning on their own.
-function ZeroChip({ value }: { value: string | null }) {
+function ZeroChip({ value, month }: { value: string | null; month?: string | null }) {
   const safe = !value;
   const Icon = safe ? CheckCircle2 : AlertTriangle;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-display text-lg font-extrabold leading-tight tracking-[-0.02em] ${zeroChip(value)}`}>
+    <span title={RUNWAY_DESCRIPTION} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 font-display text-lg font-extrabold leading-tight tracking-[-0.02em] ${zeroChip(value)}`}>
       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-      {value || 'Never'}
+      {zeroDateLabel(month, value)}
     </span>
   );
 }

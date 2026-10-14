@@ -107,7 +107,7 @@ export default function IncomeSection({
               return (
                 <tr key={c.clientKey} className={`border-b border-border hover:bg-muted/10 ${isAlt ? 'bg-row-alt' : ''}`}>
                   <td className={`sticky left-0 z-10 px-3 py-1.5 text-xs pl-7 truncate ${isAlt ? 'bg-row-alt' : 'bg-card'}`}>
-                    {c.clientName}
+                    {c.clientName}{c.excluded && <span className="ml-1 text-muted-foreground">(excluded)</span>}
                   </td>
                   {months.map((m, i) => {
                     const hasUnreviewed = clientUnreviewed?.has(m) ?? false;

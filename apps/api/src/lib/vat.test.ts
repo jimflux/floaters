@@ -207,3 +207,22 @@ describe("computeVat", () => {
     expect(r.vatOwedNow).toBe(0);
   });
 });
+
+
+describe("VAT cash replaces quarterly forecasts", () => {
+  const params = { months: ["2026-09", "2026-10", "2026-11"], currentMonthIndex: 0, committedVatByIssueMonth: new Map([["2026-08", 3457]]), projectedVatByExpectedMonth: new Map<string, number>(), paidQuarters: new Set<string>() };
+  it("offsets an early payment against the same completed quarter", () => {
+    const res = computeVat({ ...params, paymentsByMonth: new Map([["2026-09", 3457]]) });
+    expect(res.vatOwedNow).toBe(0);
+    expect(res.committedBillByMonth.size).toBe(0);
+  });
+  it("keeps the unpaid portion of a partial payment and nets refunds", () => {
+    const res = computeVat({ ...params, paymentsByMonth: new Map([["2026-09", 1500], ["2026-10", -500]]) });
+    expect(res.vatOwedNow).toBe(1957);
+    expect(res.committedBillByMonth.get("2026-10")).toBe(2457);
+  });
+  it("does not offset a different quarter", () => {
+    const res = computeVat({ ...params, paymentsByMonth: new Map([["2026-07", 3457]]) });
+    expect(res.committedBillByMonth.get("2026-10")).toBe(3457);
+  });
+});

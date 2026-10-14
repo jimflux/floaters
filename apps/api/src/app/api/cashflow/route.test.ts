@@ -774,3 +774,80 @@ describe("cashflow route: VAT", () => {
     expect(res.cashOut.find((a) => a.accountCode === "VAT_LIABILITY")).toBeUndefined();
   });
 });
+
+
+describe("VAT payment replacement and temporary exclusions", () => {
+  beforeEach(() => {
+    vi.setSystemTime(new Date("2026-10-14T12:00:00Z"));
+    state.chartAccounts.push({ code: "820", name: "VAT", type: "CURRENTLIABILITY" });
+    state.vatState = { enabled: true, paid_quarters: [] };
+    state.invoices = [{ xero_id: "quarter", type: "ACCREC", status: "PAID", total: 20742, total_tax: 3457, amount_due: 0, issue_date: "2026-08-10", due_date: "2026-08-31", contact_id: "c1", contact_name: "Client", line_items: [] }];
+  });
+
+  it("does not forecast an ordinary VAT override as well as the quarterly bill", async () => {
+    state.overrides = [{ account_code: "820", month: "2026-10", amount: 4095 }];
+    const res = await run();
+    expect(res.cashOut.filter(a => a.accountName === "VAT")).toHaveLength(1);
+    expect(res.committedNet[1]).toBe(-3457);
+    expect(res.committedClosing[1]).toBe(6543);
+  });
+
+  it("keeps actual VAT cash and removes the covered quarterly forecast", async () => {
+    state.bankTxns = [{ type: "SPEND", total: 4095, date: "2026-10-07", status: "AUTHORISED", line_items: [{ AccountCode: "820", LineAmount: 4095 }] }];
+    const res = await run();
+    expect(res.cashOut.filter(a => a.accountName === "VAT")).toHaveLength(1);
+    expect(res.cashOut.find(a => a.accountCode === "VAT_LIABILITY")!.monthly[1]).toBe(4095);
+    expect(res.committedClosing[1]).toBe(10000);
+    expect(res.cashOut.find(a => a.accountCode === "VAT_LIABILITY")!.monthly[2]).toBe(0);
+  });
+
+  it("projects only the remainder after a partial VAT payment", async () => {
+    state.bankTxns = [{ type: "SPEND", total: 1000, date: "2026-10-07", status: "AUTHORISED", line_items: [{ AccountCode: "820", LineAmount: 1000 }] }];
+    const res = await run();
+    expect(res.committedClosing[1]).toBe(7543);
+    expect(res.committedNet[1]).toBe(-3457);
+  });
+
+  it("excludes future costs while keeping recorded cash and restores them without writes", async () => {
+    state.vatState = null;
+    state.bankTxns = [{ type: "SPEND", total: 100, date: "2026-10-07", status: "AUTHORISED", line_items: [{ AccountCode: "500", LineAmount: 100 }] }];
+    state.overrides = [{ account_code: "500", month: "2026-10", amount: 1000 }, { account_code: "500", month: "2026-11", amount: 1000 }];
+    const excluded = await GET({ url: req.url + "&excludeCost=500" } as Parameters<typeof GET>[0]) as unknown as CashflowResponse;
+    expect(excluded.committedClosing[1]).toBe(10000);
+    expect(excluded.committedNet[1]).toBe(-100);
+    expect(excluded.committedNet[2]).toBe(0);
+    expect((await run()).committedClosing[1]).toBe(9100);
+  });
+
+  it("extends the zero date beyond the visible window using ongoing spending", async () => {
+    state.vatState = null;
+    state.bankTxns = ["07", "08", "09"].map(m => ({ type: "SPEND", total: 1000, date: `2026-${m}-01`, status: "AUTHORISED", line_items: [{ AccountCode: "500", LineAmount: 1000 }] }));
+    const res = await run();
+    expect(res.months).toEqual(["2026-09", "2026-10", "2026-11"]);
+    expect(res.fallsBelowZeroMonth).toBe("2027-07");
+  });
+});
+
+
+it("received income replaces its linked projection without counting the cash twice", async () => {
+  state.projections = [{ id: "p1", client_label: "Client", contact_id: "c1", amount: 1200, expected_month: "2026-06", created_at: "2026-06-01", updated_at: "2026-06-01" }];
+  state.invoices = [{ xero_id: "paid", type: "ACCREC", status: "PAID", projection_id: "p1", total: 1200, amount_due: 0, due_date: "2026-06-10", contact_id: "c1", contact_name: "Client", line_items: [] }];
+  state.payments = [{ payment_type: "ACCRECPAYMENT", amount: 1200, date: "2026-06-10", status: "AUTHORISED", invoice_xero_id: "paid" }];
+  const res = await run();
+  expect(res.income.totals.paid[1]).toBe(1200);
+  expect(res.income.totals.invoiced[1]).toBe(0);
+  expect(res.income.totals.projected[1]).toBe(0);
+  expect(res.optimisticClosing[1]).toBe(10000);
+});
+
+it("excluding an income client retains cash, removes expected income and its projected VAT", async () => {
+  state.projections = [{ id: "p1", client_label: "Client", contact_id: "c1", amount: 1200, expected_month: "2026-06", created_at: "2026-06-01", updated_at: "2026-06-01" }];
+  state.invoices = [{ xero_id: "partial", type: "ACCREC", status: "AUTHORISED", total: 600, total_tax: 100, issue_date: "2026-06-01", amount_due: 300, due_date: "2026-06-10", contact_id: "c1", contact_name: "Client", line_items: [] }];
+  state.payments = [{ payment_type: "ACCRECPAYMENT", amount: 300, date: "2026-06-10", status: "AUTHORISED", invoice_xero_id: "partial" }];
+  state.vatState = { enabled: true, paid_quarters: [] };
+  const res = await GET({ url: req.url + "&excludeClient=contact%3Ac1" } as Parameters<typeof GET>[0]) as unknown as CashflowResponse;
+  expect(res.income.totals.paid[1]).toBe(300);
+  expect(res.income.totals.invoiced[1]).toBe(0);
+  expect(res.income.totals.projected[1]).toBe(0);
+  expect(res.vatOwedNow).toBe(100); // VAT on an issued invoice remains a real obligation.
+});
