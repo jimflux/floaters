@@ -589,6 +589,7 @@ export async function GET(request: NextRequest) {
         projectedVatByExpectedMonth,
         paidQuarters,
         paymentsByMonth: vatCashByMonth,
+        forecastPaymentsExcluded: excludedCosts.has("VAT_LIABILITY"),
       });
     }
     const vatCommittedBill = (m: string) => excludedCosts.has("VAT_LIABILITY") ? 0 : vatResult?.committedBillByMonth.get(m) ?? 0;

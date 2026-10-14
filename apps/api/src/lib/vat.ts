@@ -154,6 +154,7 @@ export function computeVat(params: {
   projectedVatByExpectedMonth: Map<string, number>;
   paidQuarters: Set<string>;
   paymentsByMonth?: Map<string, number>;
+  forecastPaymentsExcluded?: boolean;
 }): VatResult {
   const { months, currentMonthIndex, committedVatByIssueMonth, projectedVatByExpectedMonth, paidQuarters } = params;
   const currentMonth = months[currentMonthIndex];
@@ -226,7 +227,7 @@ export function computeVat(params: {
     for (const q of allQuarters) {
       const info = quarterInfo.get(q)!;
       const committed = committedByQuarter.get(q) ?? 0;
-      if (info.settled || info.paymentMonth <= months[i]) {
+      if (info.settled || (!params.forecastPaymentsExcluded && info.paymentMonth <= months[i])) {
         paid += committed;
       } else {
         let cashPaid = 0;

@@ -226,3 +226,10 @@ describe("VAT cash replaces quarterly forecasts", () => {
     expect(res.committedBillByMonth.get("2026-10")).toBe(3457);
   });
 });
+
+
+it("keeps real VAT owed when its future payment is temporarily excluded", () => {
+  const res = computeVat({ months: ["2026-10", "2026-11"], currentMonthIndex: 0, committedVatByIssueMonth: new Map([["2026-08", 3457]]), projectedVatByExpectedMonth: new Map(), paidQuarters: new Set(), paymentsByMonth: new Map([["2026-10", 1000]]), forecastPaymentsExcluded: true });
+  expect(res.vatOwedNow).toBe(2457);
+  expect(res.committedLiability).toEqual([2457, 2457]);
+});

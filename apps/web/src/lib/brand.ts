@@ -20,8 +20,9 @@ export function cellTone(value: number, isCurrentMonth: boolean): string {
 export function zeroChip(value: string | null): string {
   if (!value) return 'bg-mint text-aubergine';
   const lower = value.toLowerCase();
-  if (lower === 'this month' || lower.includes('1 month') || lower.includes('2 month')) return 'bg-coral text-aubergine';
-  if (lower.includes('3 month') || lower.includes('4 month') || lower.includes('5 month')) return 'bg-sun text-aubergine';
+  const months = lower === 'this month' ? 0 : Number(lower.match(/^(\d+) months?$/)?.[1] ?? Infinity);
+  if (months <= 2) return 'bg-coral text-aubergine';
+  if (months <= 5) return 'bg-sun text-aubergine';
   return 'bg-mint text-aubergine';
 }
 
