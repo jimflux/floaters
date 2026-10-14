@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { NextRequest } from "next/server";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { z } from "zod/v4";
+import { monthsBetween, zeroBalanceMonth } from "@/lib/runway";
 import { HISTORY_MONTHS } from "@/lib/xero/sync";
 import {
   expandProjection,
@@ -38,6 +39,8 @@ const HISTORY_FOR_AVG = 3;
 const querySchema = z.object({
   back: z.coerce.number().int().min(0).max(HISTORY_MONTHS).default(3),
   forward: z.coerce.number().int().min(1).max(24).default(12),
+  excludeCost: z.array(z.string().max(100)).max(100).default([]),
+  excludeClient: z.array(z.string().max(200)).max(100).default([]),
 });
 
 interface LineItem {
@@ -54,6 +57,8 @@ export async function GET(request: NextRequest) {
     const parsed = querySchema.safeParse({
       back: searchParams.get("back") ?? undefined,
       forward: searchParams.get("forward") ?? undefined,
+      excludeCost: searchParams.getAll("excludeCost"),
+      excludeClient: searchParams.getAll("excludeClient"),
     });
     if (!parsed.success) {
       return error(
@@ -61,6 +66,8 @@ export async function GET(request: NextRequest) {
       );
     }
     const { back: monthsBack, forward: monthsForward } = parsed.data;
+    const excludedCosts = new Set(parsed.data.excludeCost);
+    const excludedClients = new Set(parsed.data.excludeClient);
 
     const now = startOfMonth(new Date());
     const from = subMonths(now, monthsBack);
@@ -333,7 +340,7 @@ export async function GET(request: NextRequest) {
       if (INCOME_TYPES.has(type)) {
         // Post-dated receipts and bill income lines are expected cash: they
         // sit with the promises, not the banked money (R18).
-        addIncome("invoiced", "UNASSIGNED", monthKey, signedCash);
+        if (!excludedClients.has("UNASSIGNED")) addIncome("invoiced", "UNASSIGNED", monthKey, signedCash);
       } else {
         addTo(projectedOut, code, name, type, monthKey, -signedCash);
       }
@@ -427,7 +434,7 @@ export async function GET(request: NextRequest) {
         );
         nameClient(key, (inv?.contact_name as string | null) ?? null, 2);
         if (postDated) {
-          addIncome("invoiced", key, monthKey, amount);
+          if (!excludedClients.has(key)) addIncome("invoiced", key, monthKey, amount);
         } else {
           addIncome("paid", key, monthKey, amount);
           actualMonthNet.set(
@@ -457,7 +464,6 @@ export async function GET(request: NextRequest) {
       if (!rawDate) continue;
       let projMonth = rawDate.slice(0, 7);
       if (projMonth < currentMonth) projMonth = currentMonth;
-      if (!months.includes(projMonth)) continue;
 
       if (inv.type === "ACCREC") {
         const key = clientKey(
@@ -465,7 +471,7 @@ export async function GET(request: NextRequest) {
           inv.contact_name as string | null
         );
         nameClient(key, inv.contact_name as string | null, 2);
-        addIncome("invoiced", key, projMonth, remaining);
+        if (!excludedClients.has(key)) addIncome("invoiced", key, projMonth, remaining);
         if (rawDate < today) clientFor(key).overdue.add(projMonth);
       } else {
         const lineItems = (inv.line_items as LineItem[] | null) || [];
@@ -507,12 +513,11 @@ export async function GET(request: NextRequest) {
       let named = false;
       for (const occ of occurrences) {
         if (occ.lapsed || occ.remainder <= 0) continue;
-        if (!months.includes(occ.month)) continue;
         if (!named) {
           nameClient(key, (proj.client_label || "").trim().replace(/\s+/g, " ") || null, 1);
           named = true;
         }
-        addIncome("projected", key, occ.month, occ.remainder);
+        if (!excludedClients.has(key)) addIncome("projected", key, occ.month, occ.remainder);
       }
     }
 
@@ -523,6 +528,17 @@ export async function GET(request: NextRequest) {
     // missing table or disabled flag degrades to today's shape.
     // -----------------------------------------------------------------------
     const vatEnabled = vatStateResult.data?.enabled === true;
+    // This single-user chart names its tax-control account VAT. Its code can
+    // vary, so use the synced name rather than assuming Xero's default code.
+    const vatAccountCodes = new Set(chartAccounts.filter(a => a.name?.trim().toUpperCase() === "VAT" && a.type !== "BANK" && !INCOME_TYPES.has(a.type)).map(a => a.code));
+    const vatCashByMonth = new Map<string, number>();
+    for (const code of vatAccountCodes) {
+      for (const source of [actualOut, projectedOut]) {
+        for (const [month, amount] of source.get(code)?.months ?? []) {
+          vatCashByMonth.set(month, (vatCashByMonth.get(month) ?? 0) + amount);
+        }
+      }
+    }
     const paidQuarters = new Set<string>(vatStateResult.data?.paid_quarters ?? []);
     const vatOverride = new Map<string, boolean>(
       (vatableResult.data ?? []).map((r) => [r.client_key as string, r.vatable as boolean])
@@ -560,7 +576,7 @@ export async function GET(request: NextRequest) {
       const projectedVatByExpectedMonth = new Map<string, number>();
       for (const proj of projections as ProjectionRow[]) {
         const key = clientKey(proj.contact_id, proj.client_label);
-        if (!vatableFor(key)) continue;
+        if (excludedClients.has(key) || !vatableFor(key)) continue;
         const byMonth = projectionVatByMonth(proj, assignedByProjection.get(proj.id) || [], currentMonth);
         for (const [m, vat] of byMonth) {
           projectedVatByExpectedMonth.set(m, (projectedVatByExpectedMonth.get(m) ?? 0) + vat);
@@ -572,10 +588,12 @@ export async function GET(request: NextRequest) {
         committedVatByIssueMonth,
         projectedVatByExpectedMonth,
         paidQuarters,
+        paymentsByMonth: vatCashByMonth,
+        forecastPaymentsExcluded: excludedCosts.has("VAT_LIABILITY"),
       });
     }
-    const vatCommittedBill = (m: string) => vatResult?.committedBillByMonth.get(m) ?? 0;
-    const vatOptimisticExtra = (m: string) => vatResult?.optimisticExtraByMonth.get(m) ?? 0;
+    const vatCommittedBill = (m: string) => excludedCosts.has("VAT_LIABILITY") ? 0 : vatResult?.committedBillByMonth.get(m) ?? 0;
+    const vatOptimisticExtra = (m: string) => excludedCosts.has("VAT_LIABILITY") ? 0 : vatResult?.optimisticExtraByMonth.get(m) ?? 0;
 
     // The last 3 calendar months before the current one, independent of the
     // visible window (cash was fetched at least that far back)
@@ -609,7 +627,9 @@ export async function GET(request: NextRequest) {
         const accountOverrides = overrideLookup.get(code);
 
         const avgValues = avgMonths.map((m) => actual?.get(m) || 0);
-        const avg = avgValues.reduce((a, b) => a + b, 0) / avgMonths.length;
+        const managedVat = vatEnabled && vatAccountCodes.has(code);
+        const excluded = excludedCosts.has(code) || (managedVat && excludedCosts.has("VAT_LIABILITY"));
+        const avg = managedVat || excluded ? 0 : avgValues.reduce((a, b) => a + b, 0) / avgMonths.length;
 
         const monthly: number[] = [];
         const isProjected: boolean[] = [];
@@ -618,8 +638,8 @@ export async function GET(request: NextRequest) {
         for (let i = 0; i < months.length; i++) {
           const m = months[i];
           const act = actual?.get(m);
-          const proj = projected?.get(m);
-          const ovr = accountOverrides?.get(m);
+          const proj = excluded ? undefined : projected?.get(m);
+          const ovr = excluded || managedVat ? undefined : accountOverrides?.get(m);
 
           if (i < currentMonthIndex) {
             monthly.push(round(act || 0));
@@ -660,10 +680,11 @@ export async function GET(request: NextRequest) {
             )
           : false;
 
-        if (monthly.some((v) => v !== 0) || hasLiveOverride) {
+        if (monthly.some((v) => v !== 0) || hasLiveOverride || excluded) {
           accounts.push({
             accountCode: code,
             accountName: data.name,
+            excluded,
             monthly,
             isProjected,
             hasOverride,
@@ -715,10 +736,11 @@ export async function GET(request: NextRequest) {
           totals.projected[i] = round(totals.projected[i] + proj);
         }
 
-        if (monthly.some((v) => v !== 0)) {
+        if (monthly.some((v) => v !== 0) || excludedClients.has(key)) {
           clients.push({
             clientKey: key,
             clientName: data.name || "Unknown",
+            excluded: excludedClients.has(key),
             monthly,
             paid,
             invoiced,
@@ -763,24 +785,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const cashOut = allCashOut.filter((a) => !hiddenCodes.has(a.accountCode));
+    const cashOut = allCashOut.filter((a) => !hiddenCodes.has(a.accountCode) && !(vatEnabled && vatAccountCodes.has(a.accountCode)));
+    const vatCashAccounts = allCashOut.filter(a => vatAccountCodes.has(a.accountCode));
+    const vatCashRow = months.map((_, i) => vatEnabled ? round(vatCashAccounts.reduce((sum, a) => sum + a.monthly[i], 0)) : 0);
+    const vatDisplayRow = months.map((m, i) => round(vatCashRow[i] + vatCommittedBill(m)));
+    const vatProjectedDisplayRow = months.map((m, i) => round(vatDisplayRow[i] + vatOptimisticExtra(m)));
 
-    // Display-only VAT cost row. `monthly` carries the committed (issued-only)
-    // bill for the committed view; the projected view swaps in vatProjectedBill
-    // client-side. Not part of allCashOut, so it never feeds the outflows sum
-    // that already subtracted the bill from committedNet. The VAT_LIABILITY code
-    // is the sentinel the web uses to render it non-editable. Push whenever
-    // either series has a bill, so a projected-only quarter still gets a row.
-    if (
-      vatResult &&
-      (vatResult.vatRow.some((v) => v !== 0) ||
-        vatResult.vatRowProjected.some((v) => v !== 0))
-    ) {
+    // One VAT row: actual/known cash plus only the unpaid modelled remainder.
+    // The cash part is already in allCashOut; the remainder is in the VAT walk.
+    if (vatResult && (vatDisplayRow.some(v => v !== 0) || vatProjectedDisplayRow.some(v => v !== 0) || excludedCosts.has("VAT_LIABILITY"))) {
       cashOut.push({
         accountCode: "VAT_LIABILITY",
         accountName: "VAT",
-        monthly: vatResult.vatRow,
-        isProjected: months.map((_, i) => i >= currentMonthIndex),
+        excluded: excludedCosts.has("VAT_LIABILITY"),
+        monthly: vatDisplayRow,
+        isProjected: months.map((m, i) => i >= currentMonthIndex && (vatCommittedBill(m) + vatOptimisticExtra(m) !== 0)),
         hasOverride: months.map(() => false),
       });
     }
@@ -839,18 +858,48 @@ export async function GET(request: NextRequest) {
       round(c - (vatResult?.committedLiability[i] ?? 0))
     );
 
-    // "Falls below £0 in" — format is string-matched by the web app
-    function fallsBelow(series: number[]): string | null {
-      for (let i = currentMonthIndex; i < series.length; i++) {
-        if (series[i] < 0) {
-          const monthsUntil = i - currentMonthIndex;
-          if (monthsUntil === 0) return "This month";
-          if (monthsUntil === 1) return "1 month";
-          return `${monthsUntil} months`;
-        }
+    // Runway uses every known future event, not just the visible columns.
+    // Beyond the final event, the same historical-average costs continue.
+    const extraCommitted = new Map<string, number>();
+    const extraOptimistic = new Map<string, number>();
+    const addFuture = (map: Map<string, number>, m: string, value: number) => {
+      if (m > currentMonth) map.set(m, round((map.get(m) ?? 0) + value));
+    };
+    for (const c of incomeClients.values()) {
+      for (const [m, value] of c.invoiced) {
+        addFuture(extraCommitted, m, round(value));
+        addFuture(extraOptimistic, m, round(value));
       }
-      return null;
+      for (const [m, value] of c.projected) addFuture(extraOptimistic, m, round(value));
     }
+    let baselineNet = 0;
+    const costCodes = new Set([...actualOut.keys(), ...projectedOut.keys()]);
+    for (const code of costCodes) {
+      const managedVat = vatEnabled && vatAccountCodes.has(code);
+      if (excludedCosts.has(code) || (managedVat && excludedCosts.has("VAT_LIABILITY"))) continue;
+      const avg = managedVat ? 0 : round(avgMonths.reduce((sum, m) => sum + (actualOut.get(code)?.months.get(m) ?? 0), 0) / avgMonths.length);
+      baselineNet -= avg;
+      const bills = projectedOut.get(code)?.months;
+      const overrides = managedVat ? undefined : overrideLookup.get(code);
+      const eventMonths = new Set([...(bills?.keys() ?? []), ...(overrides?.keys() ?? [])]);
+      for (const m of eventMonths) {
+        const cost = round(bills?.get(m) ?? overrides?.get(m) ?? avg);
+        addFuture(extraCommitted, m, avg - cost);
+        addFuture(extraOptimistic, m, avg - cost);
+      }
+    }
+    for (const [m] of vatResult?.committedBillByMonth ?? []) {
+      addFuture(extraCommitted, m, -vatCommittedBill(m));
+      addFuture(extraOptimistic, m, -vatCommittedBill(m));
+    }
+    for (const [m] of vatResult?.optimisticExtraByMonth ?? []) addFuture(extraOptimistic, m, -vatOptimisticExtra(m));
+    const fallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: committedClosing[currentMonthIndex], baselineNet, extraNetByMonth: extraCommitted});
+    const optimisticFallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: optimisticClosing[currentMonthIndex], baselineNet, extraNetByMonth: extraOptimistic});
+    const relativeRunway = (m: string | null) => {
+      if (!m) return null;
+      const distance = monthsBetween(currentMonth, m);
+      return distance === 0 ? "This month" : distance === 1 ? "1 month" : `${distance} months`;
+    };
 
     // Accounts info list (P&L accounts with hidden status; bank accounts are
     // not part of the grid). Income hiding no longer affects the income
@@ -870,8 +919,10 @@ export async function GET(request: NextRequest) {
 
     const response: CashflowResponse = {
       currentBalance: round(currentBalance),
-      fallsBelowZeroIn: fallsBelow(committedClosing),
-      optimisticFallsBelowZeroIn: fallsBelow(optimisticClosing),
+      fallsBelowZeroIn: relativeRunway(fallsBelowZeroMonth),
+      fallsBelowZeroMonth,
+      optimisticFallsBelowZeroIn: relativeRunway(optimisticFallsBelowZeroMonth),
+      optimisticFallsBelowZeroMonth,
       currentMonthIndex,
       months,
       income,
@@ -885,7 +936,7 @@ export async function GET(request: NextRequest) {
       // VAT surfaces (present only when VAT is enabled).
       vatAdjustedClosing: vatResult ? vatAdjustedClosing : undefined,
       vatOwedNow: vatResult ? vatResult.vatOwedNow : undefined,
-      vatProjectedBill: vatResult ? vatResult.vatRowProjected : undefined,
+      vatProjectedBill: vatResult ? vatProjectedDisplayRow : undefined,
       vatCurrentQuarter: vatResult
         ? { key: quarterEndForMonth(currentMonth), paid: paidQuarters.has(quarterEndForMonth(currentMonth)) }
         : undefined,

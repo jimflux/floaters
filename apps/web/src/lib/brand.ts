@@ -20,8 +20,9 @@ export function cellTone(value: number, isCurrentMonth: boolean): string {
 export function zeroChip(value: string | null): string {
   if (!value) return 'bg-mint text-aubergine';
   const lower = value.toLowerCase();
-  if (lower === 'this month' || lower.includes('1 month') || lower.includes('2 month')) return 'bg-coral text-aubergine';
-  if (lower.includes('3 month') || lower.includes('4 month') || lower.includes('5 month')) return 'bg-sun text-aubergine';
+  const months = lower === 'this month' ? 0 : Number(lower.match(/^(\d+) months?$/)?.[1] ?? Infinity);
+  if (months <= 2) return 'bg-coral text-aubergine';
+  if (months <= 5) return 'bg-sun text-aubergine';
   return 'bg-mint text-aubergine';
 }
 
@@ -32,3 +33,14 @@ export const LAYER_DOT = {
   invoiced: 'bg-iris',
   projected: 'bg-sun',
 } as const;
+
+
+export function zeroDateLabel(month: string | null | undefined, relative: string | null): string {
+  if (month) {
+    const [year, m] = month.split('-').map(Number);
+    return new Date(year, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }
+  return relative || 'No depletion at current spending';
+}
+
+export const RUNWAY_DESCRIPTION = 'Estimated crossing month. Includes all known future income and costs, then continues the current average spending after the last projection. Monthly data cannot determine an exact day.';

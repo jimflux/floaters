@@ -24,8 +24,11 @@ function apiFetch(path: string, init: RequestInit & { headers?: Record<string, s
   });
 }
 
-export function getCashflow(): Promise<CashflowData> {
-  return apiFetch(`/api/cashflow?back=3&forward=12`, { headers }).then(res => {
+export function getCashflow(exclusions: { costs: string[]; clients: string[] } = { costs: [], clients: [] }): Promise<CashflowData> {
+  const params = new URLSearchParams({ back: '3', forward: '12' });
+  for (const code of exclusions.costs) params.append('excludeCost', code);
+  for (const key of exclusions.clients) params.append('excludeClient', key);
+  return apiFetch(`/api/cashflow?${params}`, { headers }).then(res => {
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return res.json();
   });

@@ -4,8 +4,9 @@
 // the only guard. v3 adds the VAT surfaces (vatAdjustedClosing, vatOwedNow, the
 // VAT_LIABILITY cost row); additive, but bumped so a stale v2 payload can't
 // hydrate the VAT-aware UI. v4 adds vatProjectedBill (issued + projected VAT for
-// the VAT cost row on the projected view).
-export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v4';
+// the VAT cost row on the projected view). v5 adds calendar runway dates and
+// reconciles actual VAT payments with the calculated bill.
+export const CASHFLOW_CACHE_KEY = 'cashflow_cache_v5';
 export const OVERRIDES_CACHE_KEY = 'projection_overrides_cache_v2';
 
 /** Drops the cached financial data, so it doesn't outlive the session in this browser. */

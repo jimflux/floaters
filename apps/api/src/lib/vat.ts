@@ -153,9 +153,19 @@ export function computeVat(params: {
   committedVatByIssueMonth: Map<string, number>;
   projectedVatByExpectedMonth: Map<string, number>;
   paidQuarters: Set<string>;
+  paymentsByMonth?: Map<string, number>;
+  forecastPaymentsExcluded?: boolean;
 }): VatResult {
   const { months, currentMonthIndex, committedVatByIssueMonth, projectedVatByExpectedMonth, paidQuarters } = params;
   const currentMonth = months[currentMonthIndex];
+
+  // VAT-account cash pays the most recently completed quarter (including
+  // an early payment in the month before its normal due month).
+  const paymentsByQuarter = new Map<string, number>();
+  for (const [month, amount] of params.paymentsByMonth ?? []) {
+    const q = quarterEndForMonth(addMonthKey(month, -3));
+    paymentsByQuarter.set(q, (paymentsByQuarter.get(q) ?? 0) + amount);
+  }
 
   // Aggregate committed and projected VAT by quarter-end.
   const committedByQuarter = new Map<string, number>();
@@ -184,8 +194,10 @@ export function computeVat(params: {
     quarterInfo.set(q, { paymentMonth, settled });
     if (settled) continue;
     // Upcoming: place visible outflows at the payment month if it's in view.
-    const committed = committedByQuarter.get(q) ?? 0;
-    const projected = projectedByQuarter.get(q) ?? 0;
+    const issued = committedByQuarter.get(q) ?? 0;
+    const paid = Math.max(0, paymentsByQuarter.get(q) ?? 0);
+    const committed = round2(Math.max(0, issued - paid));
+    const projected = round2(Math.max(0, issued + (projectedByQuarter.get(q) ?? 0) - paid) - committed);
     if (committed !== 0) {
       committedBillByMonth.set(paymentMonth, round2((committedBillByMonth.get(paymentMonth) ?? 0) + committed));
     }
@@ -215,7 +227,15 @@ export function computeVat(params: {
     for (const q of allQuarters) {
       const info = quarterInfo.get(q)!;
       const committed = committedByQuarter.get(q) ?? 0;
-      if (info.settled || info.paymentMonth <= months[i]) paid += committed;
+      if (info.settled || (!params.forecastPaymentsExcluded && info.paymentMonth <= months[i])) {
+        paid += committed;
+      } else {
+        let cashPaid = 0;
+        for (const [m, amount] of params.paymentsByMonth ?? []) {
+          if (m <= months[i] && quarterEndForMonth(addMonthKey(m, -3)) === q) cashPaid += amount;
+        }
+        paid += Math.min(committed, Math.max(0, cashPaid));
+      }
     }
     committedLiability[i] = round2(accrued - paid);
   }

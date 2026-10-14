@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CashflowData } from "@/lib/types";
 
@@ -42,7 +42,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    getCashflow: () => getCashflow(),
+    getCashflow: (exclusions: unknown) => getCashflow(exclusions),
     getProjectionOverrides: () => Promise.resolve({ overrides: [] }),
     getPipeline: () =>
       Promise.resolve({ currentMonth: "2026-06", projections: [], unreviewed: [], contacts: [] }),
@@ -156,5 +156,29 @@ describe("forecast view toggle", () => {
     // Net row relabels and the optimistic ending (£55,500) now leads the walk.
     expect(screen.getByText("Net cash movement (projected)")).toBeInTheDocument();
     expect(screen.getAllByText("£55,500").length).toBeGreaterThan(0);
+  });
+});
+
+
+describe("zero date and temporary forecast rows", () => {
+  it("shows a calendar month beyond the chart instead of Never", async () => {
+    getCashflow.mockResolvedValue({ ...newShape(), fallsBelowZeroIn: "25 months", fallsBelowZeroMonth: "2028-07" });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CashflowPage /></QueryClientProvider>);
+    expect(await screen.findByText("July 2028")).toBeInTheDocument();
+    expect(screen.queryByText("Never")).not.toBeInTheDocument();
+  });
+
+  it("excludes and restores a row through a temporary read without changing saved projections", async () => {
+    getCashflow.mockImplementation((exclusions: { costs: string[]; clients: string[] }) => Promise.resolve({ ...newShape(), income: { ...newShape().income, clients: newShape().income.clients.map(c => ({ ...c, projected: exclusions.clients.includes(c.clientKey) ? [0, 0, 0] : c.projected })) } }));
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CashflowPage /></QueryClientProvider>);
+    await screen.findByText("IKEA");
+    fireEvent.click(screen.getByRole("button", { name: "Choose forecast rows" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include IKEA" }));
+    await waitFor(() => expect(getCashflow).toHaveBeenCalledWith({ costs: [], clients: ["contact:c1"] }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose forecast rows" })).toHaveTextContent("1 excluded"));
+    if (!screen.queryByRole("button", { name: "Restore all rows" })) fireEvent.click(screen.getByRole("button", { name: "Choose forecast rows" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore all rows" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Choose forecast rows" })).not.toHaveTextContent("excluded"));
+    expect(JSON.parse(localStorage.getItem(CASHFLOW_CACHE_KEY)!).income.clients[0].projected).toEqual([0, 0, 45500]);
   });
 });
