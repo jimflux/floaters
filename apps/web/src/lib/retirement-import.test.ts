@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { strToU8, zipSync } from 'fflate';
+import { strToU8, strFromU8, unzipSync, zipSync } from 'fflate';
 import { createExampleRetirementPlan } from './retirement';
 import { importRetirementJson, importRetirementWorkbook, MAX_RETIREMENT_FILE_BYTES } from './retirement-import';
 
@@ -29,6 +29,16 @@ describe('retirement workbook import', () => {
     expect(plan.oneOffs).toEqual(expect.arrayContaining([expect.objectContaining({ year: 2028, asset: 'pension', person: 0, amount: 1000 }), expect.objectContaining({ year: 2030, asset: 'cash', person: 1, amount: -500 })]));
     expect(warnings.join(' ')).toContain('starts in 2024');
     expect(warnings.join(' ')).toContain('Property');
+  });
+  it('rejects input formulas without cached values instead of importing zero', () => {
+    const files = unzipSync(new Uint8Array(workbook()));
+    files['xl/worksheets/input.xml'] = strToU8(strFromU8(files['xl/worksheets/input.xml']).replace('<c r="B12"><v>1000</v></c>', '<c r="B12"><f>100+200</f></c>'));
+    expect(() => importRetirementWorkbook(zipSync(files).buffer as ArrayBuffer)).toThrow('B12');
+  });
+  it('uses cached numbers without evaluating formula text', () => {
+    const files = unzipSync(new Uint8Array(workbook()));
+    files['xl/worksheets/input.xml'] = strToU8(strFromU8(files['xl/worksheets/input.xml']).replace('<c r="B12"><v>1000</v></c>', '<c r="B12"><f>UNKNOWN_FUNCTION()</f><v>1000</v></c>'));
+    expect(importRetirementWorkbook(zipSync(files).buffer as ArrayBuffer).plan.people[0].assets.pension.balance).toBe(1000);
   });
   it('requires original input sheets', () => expect(() => importRetirementWorkbook(workbook({}, 'Changed'))).toThrow('original input sheets'));
   it('rejects invalid ages rather than silently replacing them', () => expect(() => importRetirementWorkbook(workbook({ B7: -1 }))).toThrow());

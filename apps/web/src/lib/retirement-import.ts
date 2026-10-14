@@ -18,7 +18,7 @@ export function importRetirementJson(text: string): RetirementImportResult {
 function xml(bytes: Uint8Array | undefined): Document {
   if (!bytes) throw new Error('The workbook is missing a required sheet.');
   const document = new DOMParser().parseFromString(strFromU8(bytes), 'application/xml');
-  if (document.getElementsByTagName('parsererror').length) throw new Error('The workbook contains invalid XML.');
+  if (document.querySelectorAll('parsererror').length) throw new Error('The workbook contains invalid XML.');
   return document;
 }
 
@@ -43,14 +43,14 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
   const workbook = xml(metadata['xl/workbook.xml']);
   const relationships = xml(metadata['xl/_rels/workbook.xml.rels']);
   const paths = new Map<string, string>();
-  for (const relation of Array.from(relationships.getElementsByTagName('Relationship'))) {
+  for (const relation of Array.from(relationships.querySelectorAll('Relationship'))) {
     if (relation.getAttribute('TargetMode') === 'External') continue;
     const target = relation.getAttribute('Target') || '';
     const path = target.startsWith('/xl/') ? target.slice(1) : `xl/${target}`;
     if (/^xl\/worksheets\/[^/]+\.xml$/.test(path)) paths.set(relation.getAttribute('Id') || '', path);
   }
   const sheets = new Map<string, string>();
-  for (const sheet of Array.from(workbook.getElementsByTagName('sheet'))) {
+  for (const sheet of Array.from(workbook.querySelectorAll('sheet'))) {
     const path = paths.get(sheet.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') || sheet.getAttribute('r:id') || '');
     if (path) sheets.set(sheet.getAttribute('name') || '', path);
   }
@@ -63,14 +63,17 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
   let entries: Record<string, Uint8Array>;
   try { entries = extract(new Set(selected)); }
   catch { throw new Error('Workbook sheets exceed the import limit.'); }
-  const strings = metadata['xl/sharedStrings.xml'] ? Array.from(xml(metadata['xl/sharedStrings.xml']).getElementsByTagName('si')).map(si => si.textContent || '') : [];
+  const strings = metadata['xl/sharedStrings.xml'] ? Array.from(xml(metadata['xl/sharedStrings.xml']).querySelectorAll('si')).map(si => si.textContent || '') : [];
   const readSheet = (path: string) => {
     const result = new Map<string, string>();
-    for (const cell of Array.from(xml(entries[path]).getElementsByTagName('c'))) {
+    for (const cell of Array.from(xml(entries[path]).querySelectorAll('c'))) {
       const reference = cell.getAttribute('r') || '';
       const type = cell.getAttribute('t');
-      const raw = type === 'inlineStr' ? cell.getElementsByTagName('is')[0]?.textContent : cell.getElementsByTagName('v')[0]?.textContent;
-      if (raw == null || raw === '') continue;
+      const raw = type === 'inlineStr' ? cell.querySelectorAll('is')[0]?.textContent : cell.querySelectorAll('v')[0]?.textContent;
+      if (raw == null || raw === '') {
+        if (cell.querySelectorAll('f').length) result.set(reference, 'Formula needs recalculation');
+        continue;
+      }
       if (type === 'e') throw new Error(`Workbook cell ${reference} contains a spreadsheet error. Recalculate and save in Excel first.`);
       result.set(reference, type === 's' ? strings[Number(raw)] || '' : raw);
     }

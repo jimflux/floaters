@@ -13,6 +13,13 @@ const updateItemSchema = z.object({
   end_date: z.string().date().nullable().optional(),
 });
 
+async function ownsBusinessScenario(connectionId: string, id: string): Promise<boolean> {
+  if (id === retirementScenarioId(connectionId)) return false;
+  const { data, error: dbError } = await supabase
+    .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
+  return !dbError && !!data;
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; itemId: string }> }
@@ -20,10 +27,7 @@ export async function PATCH(
   try {
     const connectionId = await requireConnection();
     const { id, itemId } = await params;
-    if (id === retirementScenarioId(connectionId)) return error("Scenario not found", 404);
-    const { data: scenario, error: parentError } = await supabase
-      .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
-    if (parentError || !scenario) return error("Scenario not found", 404);
+    if (!await ownsBusinessScenario(connectionId, id)) return error("Scenario not found", 404);
 
     const body = await request.json();
     const parsed = updateItemSchema.safeParse(body);
@@ -51,10 +55,7 @@ export async function DELETE(
   try {
     const connectionId = await requireConnection();
     const { id, itemId } = await params;
-    if (id === retirementScenarioId(connectionId)) return error("Scenario not found", 404);
-    const { data: scenario, error: parentError } = await supabase
-      .from("scenarios").select("id").eq("id", id).eq("connection_id", connectionId).single();
-    if (parentError || !scenario) return error("Scenario not found", 404);
+    if (!await ownsBusinessScenario(connectionId, id)) return error("Scenario not found", 404);
 
     const { error: dbError } = await supabase.from("scenario_items").delete().eq("id", itemId).eq("scenario_id", id);
     if (dbError) return error("Could not delete item", 500);
