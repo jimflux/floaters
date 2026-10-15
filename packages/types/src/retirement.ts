@@ -49,6 +49,7 @@ export interface RetirementPensionLink {
 export interface RetirementPlan {
   version: 1;
   startYear: number;
+  balanceDate?: string; // YYYY-MM-DD; legacy plans use 1 January of startYear
   endAge: number;
   partnerEnabled: boolean;
   people: [RetirementPerson, RetirementPerson];
@@ -93,6 +94,13 @@ export function retirementPlanErrors(value: unknown): string[] {
   if (!object(value)) return ['A retirement plan is required.'];
   if (value.version !== 1) errors.push('Unsupported retirement plan version.');
   number(value.startYear, 2000, 2100, 'Starting year', true);
+  if (value.balanceDate !== undefined) {
+    const date = typeof value.balanceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.balanceDate)
+      ? new Date(`${value.balanceDate}T00:00:00Z`) : null;
+    if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value.balanceDate || date.getUTCFullYear() !== value.startYear) {
+      errors.push('Balance date must be a valid date in the starting year.');
+    }
+  }
   number(value.endAge, 40, 120, 'End age', true);
   if (typeof value.partnerEnabled !== 'boolean') errors.push('Partner setting is required.');
   if (!Array.isArray(value.people) || value.people.length !== 2) return [...errors, 'Exactly two person profiles are required (partner may be disabled).'];

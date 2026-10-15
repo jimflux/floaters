@@ -12,6 +12,11 @@ export function pensionContributionForYear(
   if (person === 1 && !plan.partnerEnabled) return null;
   const links = plan.pensionLinks?.filter(link => link.person === person && link.startYear <= year) ?? [];
   if (!links.length) return null;
+  // A mid-month valuation can already include that month's payment. Resume
+  // linked payments from the following month rather than adding it twice.
+  const firstMonth = year === plan.startYear && plan.balanceDate
+    ? Number(plan.balanceDate.slice(5, 7)) + (Number(plan.balanceDate.slice(8, 10)) > 1 ? 1 : 0) : 1;
+  if (firstMonth > 12) return { amount: 0, estimated: false, extended: false };
   if (!source) throw new Error('Linked pension contributions need Floaters cashflow. Load or refresh the source.');
   const { months, cashOut } = source;
   if (!Array.isArray(months) || !months.length || months.some((month, index) =>
@@ -34,7 +39,7 @@ export function pensionContributionForYear(
       if (!Number.isFinite(value) || value < 0) throw new Error(`Pension account ${link.accountCode} month ${months[index]} has a missing, invalid or negative amount. Review the payment in Floaters and refresh.`);
       if (typeof row.isProjected?.[index] !== 'boolean') throw new Error(`Pension account ${link.accountCode} month ${months[index]} is missing its projection flag. Refresh the source.`);
     }
-    for (let month = 1; month <= 12; month += 1) {
+    for (let month = firstMonth; month <= 12; month += 1) {
       const key = `${year}-${String(month).padStart(2, '0')}`;
       if (key > lastMonth) {
         amount += row.monthly[lastIndex] * link.share * futureGrowth;
