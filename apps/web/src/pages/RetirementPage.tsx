@@ -16,6 +16,8 @@ import { milestoneLanes, retirementMilestones } from '@/lib/retirement-milestone
 import { RetirementMilestoneMarker } from '@/components/RetirementMilestoneMarker';
 import { ChildSavingsProjection } from '@/components/ChildSavingsProjection';
 import { DEFAULT_CHILD_GROWTH } from '@/lib/child-savings';
+import { analyseFire, firePlanAtAge } from '@/lib/retirement-fire';
+import { FirePlanner } from '@/components/FirePlanner';
 
 const INPUT = 'w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-iris';
 const CARD = 'min-w-0 rounded-xl bg-card p-3 shadow-sm shadow-aubergine/5 sm:p-4';
@@ -69,6 +71,9 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
   const [detailCase, setDetailCase] = useState<RetirementCase>('base');
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [annualDetailOpen, setAnnualDetailOpen] = useState(false);
+  const [fireEnabled, setFireEnabled] = useState(false);
+  const [fireAge, setFireAge] = useState<number | null>(null);
+  const [fireKeepWork, setFireKeepWork] = useState(true);
   const workbookInput = useRef<HTMLInputElement>(null);
   const jsonInput = useRef<HTMLInputElement>(null);
 
@@ -100,24 +105,39 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
     if (new Blob([fingerprint]).size > 100 * 1024) errors.push('The plan exceeds the 100 KB save and JSON import limit. Remove some rows or shorten labels.');
     return errors;
   }, [plan, fingerprint]);
+  const fire = useMemo(() => {
+    if (!fireEnabled || !plan) return { analysis: null, error: '' };
+    if (errors.length) return { analysis: null, error: 'Check the highlighted plan inputs before calculating FIRE.' };
+    try {
+      return { analysis: analyseFire(plan, pension.error ? undefined : pension.source,
+        plan.people[0].age + Math.max(0, currentYear - plan.startYear), { keepWork: fireKeepWork }), error: '' };
+    } catch (error) {
+      return { analysis: null, error: error instanceof Error ? error.message : 'Could not calculate FIRE.' };
+    }
+  }, [fireEnabled, plan, errors, pension.error, pension.source, currentYear, fireKeepWork]);
+  const previewFireAge = fire.analysis ? Math.max(fire.analysis.candidates[0].age, Math.min(
+    fire.analysis.candidates[fire.analysis.candidates.length - 1].age, fireAge ?? fire.analysis.earliestBase ?? plan!.people[0].retirementAge)) : plan?.people[0].retirementAge ?? 57;
+  const firePreview = useMemo(() => fireEnabled && fire.analysis && plan ? firePlanAtAge(plan, previewFireAge, { keepWork: fireKeepWork }) : null,
+    [fireEnabled, fire.analysis, plan, previewFireAge, fireKeepWork]);
+  const projectionPlan = firePreview ?? plan;
   const { projections, projectionError } = useMemo(() => {
-    if (!plan || errors.length) return { projections: null, projectionError: '' };
+    if (!projectionPlan || errors.length) return { projections: null, projectionError: '' };
     try {
       const projections = Object.fromEntries(RETIREMENT_CASES.map(scenario => [scenario,
-        projectRetirement(plan, scenario, pension.error ? undefined : pension.source, effectiveStress)])) as Record<RetirementCase, RetirementProjection>;
+        projectRetirement(projectionPlan, scenario, pension.error ? undefined : pension.source, effectiveStress)])) as Record<RetirementCase, RetirementProjection>;
       return { projections, projectionError: '' };
     } catch (error) {
       return { projections: null, projectionError: error instanceof Error ? error.message : 'Could not calculate the retirement projection.' };
     }
-  }, [plan, errors, pension.source, pension.error, effectiveStress]);
+  }, [projectionPlan, errors, pension.source, pension.error, effectiveStress]);
   const chartData = useMemo(() => projections?.base.years.flatMap((row, index, years) =>
     row.year >= currentYear || years[years.length - 1].year < currentYear ? [{ age: row.age,
       cautious: projections.cautious.years[index].totalAssets, base: row.totalAssets, optimistic: projections.optimistic.years[index].totalAssets }] : []), [projections, currentYear]);
   const chartCeiling = Math.max(1000, ...((chartData ?? []).map(row => row.base * 1.5)));
   const chartExceedsFocus = chartData?.some(row => RETIREMENT_CASES.some(scenario => row[scenario] > chartCeiling));
   const chartFocused = !!chartExceedsFocus && !fullChartRange;
-  const milestones = useMemo(() => plan && chartData?.length ? retirementMilestones(plan,
-    chartData.map(row => plan.startYear + row.age - plan.people[0].age), effectiveStress) : [], [plan, chartData, effectiveStress]);
+  const milestones = useMemo(() => projectionPlan && chartData?.length ? retirementMilestones(projectionPlan,
+    chartData.map(row => projectionPlan.startYear + row.age - projectionPlan.people[0].age), effectiveStress) : [], [projectionPlan, chartData, effectiveStress]);
   const placedMilestones = milestoneLanes(milestones, chartData?.[0]?.age ?? 0, chartData?.[chartData.length - 1]?.age ?? 0, chartWidth);
   const markerSpace = placedMilestones.length ? (Math.max(...placedMilestones.map(group => group.lane)) + 1) * 24 : 0;
   const activeMilestone = milestones.find(group => group.year === milestoneYear);
@@ -231,15 +251,21 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
         {!!warnings.length && <div className="rounded-tile bg-sun/20 p-4"><h2 className="font-semibold">Review imported inputs</h2><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
         {!!inputErrors.length && <div role="alert" className="rounded-tile bg-destructive/10 p-4"><h2 className="font-semibold">Check these inputs before projecting or saving</h2><ul className="mt-2 list-disc pl-5 text-sm">{inputErrors.map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
 
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Retirement calculation mode"><Button variant={fireEnabled ? 'outline' : 'secondary'} aria-pressed={!fireEnabled} onClick={() => { setFireEnabled(false); setDetailCase('base'); setStress('none'); }}>Retirement plan</Button><Button variant={fireEnabled ? 'secondary' : 'outline'} aria-pressed={fireEnabled} onClick={() => { setFireEnabled(true); setDetailCase('base'); setStress('none'); }}>Wild mode · FIRE</Button></div>
+        {fireEnabled && <FirePlanner plan={plan} analysis={fire.analysis} error={fire.error} age={previewFireAge} keepWork={fireKeepWork} onKeepWork={setFireKeepWork}
+          onAge={(age, view = 'base') => { setFireAge(age); setDetailCase(view === 'cautious' ? 'cautious' : 'base'); setStress(view === 'crash' ? 'market-drop' : 'none'); setSelectedYear(plan.startYear + age - plan.people[0].age); }}
+          onApply={() => { if (!firePreview) return; edit(draft => Object.assign(draft, structuredClone(firePreview))); setFireEnabled(false); setStress('none'); setDetailCase('base'); }} />}
+
         {detail && selected && <section className={CARD} aria-labelledby="projection-results">
           <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 id="projection-results" className="font-display text-xl font-bold">Projected assets by age</h2><p className="mt-1 text-sm text-muted-foreground">Three illustrative return cases, not probabilities.</p></div>
             <label className="text-xs font-semibold text-muted-foreground">Detail case<select aria-label="Detail case" className={`${INPUT} mt-1`} value={detailCase} onChange={event => setDetailCase(event.target.value as RetirementCase)}>{RETIREMENT_CASES.map(scenario => <option key={scenario} value={scenario}>{CASE_LABEL[scenario]}</option>)}</select></label>
           </div>
+          {firePreview && <p className="mt-2 rounded-md bg-coral/10 px-2 py-1 text-sm font-semibold">FIRE preview: retire at {previewFireAge}. Your editable plan remains at {plan.people[0].retirementAge} until you use this age.</p>}
           <div className="mt-2 flex flex-wrap items-end gap-3"><label className="text-xs font-semibold text-muted-foreground">Stress test<select aria-label="Stress test" className={`${INPUT} mt-1`} value={effectiveStress} onChange={event => setStress(event.target.value as RetirementStress)}>{Object.entries(STRESS_LABEL).filter(([key]) => plan.partnerEnabled || (key !== 'lose-you' && key !== 'lose-partner')).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><p className="max-w-3xl text-sm text-muted-foreground">{STRESS_NOTE[effectiveStress]}</p></div>
           <p className="mt-3 text-xs text-muted-foreground">Plans through your age {endAge}{plan.partnerEnabled ? ` and your partner’s age ${plan.people[1].age + endAge - plan.people[0].age}` : ''}. Balances shown are gross of future withdrawal tax.</p>
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">First annual shortfall · {CASE_LABEL[detailCase]}</p><p className="mt-2 text-lg font-bold">{detail.firstShortfall ? `Age ${detail.firstShortfall.age} · ${detail.firstShortfall.year}` : `No shortfall through age ${endAge}`}</p>{detail.firstShortfall && <p className="text-sm">{money(detail.firstShortfall.amount)} unmet</p>}</div>
-            <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Year-end assets at retirement · age {plan.people[0].retirementAge}</p><p className="mt-2 text-lg font-bold">{detail.assetsAtRetirement === null ? 'Outside projection range' : money(detail.assetsAtRetirement)}</p></div>
+            <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Year-end assets at retirement · age {projectionPlan!.people[0].retirementAge}</p><p className="mt-2 text-lg font-bold">{detail.assetsAtRetirement === null ? 'Outside projection range' : money(detail.assetsAtRetirement)}</p></div>
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Accessible assets in {selected.year} · age {selected.age}</p><p className="mt-2 text-lg font-bold">{money(selected.accessibleAssets)}</p><p className="text-xs text-muted-foreground">Excludes pensions before each person’s access age.</p></div>
           </div>
           {chartExceedsFocus && <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
