@@ -42,7 +42,7 @@ const App = () => {
         </div>
       </nav>
       <div id="cashflow-panel" role="tabpanel" aria-labelledby="cashflow-tab" hidden={tab !== 'cashflow'}><CashflowPage /></div>
-      {retirementMounted && <div id="retirement-panel" role="tabpanel" aria-labelledby="retirement-tab" hidden={tab !== 'retirement'}><RetirementPage /></div>}
+      {retirementMounted && <div id="retirement-panel" role="tabpanel" aria-labelledby="retirement-tab" hidden={tab !== 'retirement'}><RetirementPage active={tab === 'retirement'} /></div>}
     </TooltipProvider>
   </QueryClientProvider>
   );

@@ -4,8 +4,8 @@ import { createExampleRetirementPlan } from '@/lib/retirement';
 import { SignInRequiredError } from '@/lib/session';
 import type { RetirementSavedPlan } from '@floaters/types';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), workbook: vi.fn(), json: vi.fn() }));
-vi.mock('@/lib/api', () => ({ getRetirementPlan: mocks.get, saveRetirementPlan: mocks.save }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), source: vi.fn(), workbook: vi.fn(), json: vi.fn() }));
+vi.mock('@/lib/api', () => ({ getRetirementPlan: mocks.get, saveRetirementPlan: mocks.save, getRetirementPensionCashflow: mocks.source }));
 vi.mock('@/lib/retirement-import', () => ({ importRetirementWorkbook: mocks.workbook, importRetirementJson: mocks.json, MAX_RETIREMENT_FILE_BYTES: 5 * 1024 * 1024 }));
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -16,12 +16,131 @@ import RetirementPage from './RetirementPage';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.source.mockResolvedValue(pensionSource());
   mocks.get.mockResolvedValue({ plan: null, savedAt: null });
   mocks.save.mockImplementation(async plan => ({ plan, savedAt: '2026-10-14T12:00:00Z' }));
 });
 async function ready() { render(<RetirementPage />); await screen.findByText(/Example plan.*invented/i); }
 function edit(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
 
+function pensionSource(amount = 100) {
+  const year = new Date().getFullYear();
+  const months = Array.from({ length: 36 }, (_, i) => `${year + Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, '0')}`);
+  return { months, cashOut: [{ accountCode: '700', accountName: 'Company pension', monthly: months.map(() => amount), isProjected: months.map((_, i) => i > 8), hasOverride: months.map(() => false) }] };
+}
+function addPensionLink() {
+  fireEvent.click(screen.getByRole('button', { name: 'Add pension link' }));
+  edit('Pension link 1 account', '700');
+}
+describe('linked pensions', () => {
+  it('uses a linked zero instead of the preserved manual contribution', async () => {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.partnerEnabled = false;
+    plan.people[0].age = 50;
+    plan.people[0].retirementAge = 60;
+    plan.endAge = 50;
+    plan.income = []; plan.spending = []; plan.oneOffs = [];
+    for (const asset of Object.values(plan.people[0].assets)) {
+      asset.balance = 0; asset.annualContribution = 0;
+      asset.returns = { cautious: 0, base: 0, optimistic: 0 };
+    }
+    plan.people[0].assets.pension.balance = 10000;
+    plan.people[0].assets.pension.annualContribution = 7200;
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    mocks.source.mockResolvedValue(pensionSource(0));
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0]).toEqual({ age: 50, cautious: 17200, base: 17200, optimistic: 17200 });
+    addPensionLink();
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0]).toEqual({ age: 50, cautious: 10000, base: 10000, optimistic: 10000 });
+    expect(screen.getByLabelText('You pension annual contribution')).toHaveValue(7200);
+  });
+  it('keeps manual projections working after a source error and requires complete linked calendar years', async () => {
+    mocks.source.mockRejectedValueOnce(new Error('Unavailable'));
+    await ready();
+    expect(screen.getByTestId('projection-chart')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh pension source' }));
+    await screen.findByText(/Last loaded:/);
+    addPensionLink();
+    expect(screen.getByText(/£1,200.*estimated/i)).toBeInTheDocument();
+    const earlier = String(new Date().getFullYear() - 1);
+    edit('Baseline year', earlier);
+    expect(screen.getByLabelText('You pension annual contribution')).toBeEnabled();
+    edit('Pension link 1 starting year', earlier);
+    expect(screen.queryByTestId('projection-chart')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('alert').some(alert => /Pension month.*missing/.test(alert.textContent ?? ''))).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeEnabled();
+    edit('Pension link 1 starting year', String(new Date().getFullYear()));
+    expect(screen.getByTestId('projection-chart')).toBeInTheDocument();
+  });
+  it('blocks saving overallocated and blank shares without converting blank to zero', async () => {
+    await ready();
+    addPensionLink();
+    fireEvent.click(screen.getByRole('button', { name: 'Add pension link' }));
+    edit('Pension link 2 account', '700');
+    edit('Pension link 2 person', '1');
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeDisabled();
+    edit('Pension link 1 share', '60');
+    edit('Pension link 2 share', '40');
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeEnabled();
+    edit('Pension link 2 share', '');
+    expect(screen.getByLabelText('Pension link 2 share')).toHaveValue(null);
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeDisabled();
+  });
+  it('requires explicit selection, replaces manual pension using the real engine, and disconnect restores it', async () => {
+    await ready();
+    const before = screen.getByTestId('projection-chart').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Add pension link' }));
+    expect(screen.getByLabelText('Pension link 1 account')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeDisabled();
+    edit('Pension link 1 account', '700');
+    expect(screen.getByText(/£1,200.*estimated/i)).toBeInTheDocument();
+    expect(screen.getByTestId('projection-chart').textContent).not.toBe(before);
+    expect(screen.getByLabelText('You pension annual contribution')).toBeDisabled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
+    expect(mocks.save.mock.calls[0][0].pensionLinks).toEqual([{ accountCode: '700', person: 0, share: 1, startYear: new Date().getFullYear() }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect pension link 1' }));
+    expect(screen.getByTestId('projection-chart').textContent).toBe(before);
+    expect(screen.getByLabelText('You pension annual contribution')).toBeEnabled();
+  });
+  it('retains the draft and export but blocks linked results on source failure and 401', async () => {
+    await ready();
+    addPensionLink();
+    edit('You name', 'Keep my draft');
+    mocks.source.mockRejectedValueOnce(new SignInRequiredError());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh pension source' }));
+    await screen.findByRole('link', { name: 'Sign in in a new tab' });
+    expect(screen.queryByTestId('projection-chart')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('You name')).toHaveValue('Keep my draft');
+    expect(screen.getByRole('button', { name: 'Export JSON' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect pension link 1' }));
+    expect(screen.getByTestId('projection-chart')).toBeInTheDocument();
+  });
+  it('reloads on return, changes live amounts without editing the draft, and ignores older refreshes', async () => {
+    const view = render(<RetirementPage />);
+    await screen.findByText(/Example plan.*invented/i);
+    addPensionLink();
+    edit('You name', 'Preserved draft');
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+    let resolveOld!: (value: ReturnType<typeof pensionSource>) => void;
+    mocks.source.mockReturnValueOnce(new Promise(done => { resolveOld = done; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh pension source' }));
+    expect(screen.getByText(/Previous loaded amounts remain visible while updating/)).toBeInTheDocument();
+    mocks.source.mockResolvedValueOnce(pensionSource(200));
+    view.rerender(<RetirementPage active={false} />);
+    view.rerender(<RetirementPage active />);
+    await screen.findByText(/£2,400.*estimated/i);
+    await act(async () => { resolveOld(pensionSource(900)); });
+    expect(screen.getByText(/£2,400.*estimated/i)).toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(screen.getByLabelText('You name')).toHaveValue('Preserved draft');
+    expect(mocks.get).toHaveBeenCalledOnce();
+  });
+});
 describe('RetirementPage', () => {
   it('loads first, then presents a clearly unsaved example without autosaving', async () => {
     let resolve!: (value: RetirementSavedPlan) => void;
@@ -198,6 +317,7 @@ describe('RetirementPage', () => {
   it('exports the current valid draft as JSON and revokes its object URL', async () => {
     await ready();
     edit('You name', 'Export example');
+    addPensionLink();
     const create = vi.fn((_blob: Blob) => 'blob:retirement-example');
     const revoke = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: create });
@@ -214,6 +334,7 @@ describe('RetirementPage', () => {
       reader.readAsText(blob);
     });
     expect(JSON.parse(text).people[0].name).toBe('Export example');
+    expect(JSON.parse(text).pensionLinks).toEqual([{ accountCode: '700', person: 0, share: 1, startYear: new Date().getFullYear() }]);
     expect(blob.size).toBeLessThan(100 * 1024);
     expect(mocks.save).not.toHaveBeenCalled();
     click.mockRestore();

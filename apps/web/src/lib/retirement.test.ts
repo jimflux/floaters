@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RETIREMENT_ASSETS, retirementPlanErrors, type RetirementPlan } from '@floaters/types';
+import type { PensionCashflow } from './retirement-pensions';
 import { createExampleRetirementPlan, incomeTax, projectRetirement } from './retirement';
 
 function plan(): RetirementPlan {
@@ -29,6 +30,41 @@ function income(value: RetirementPlan, amount: number, person: 0 | 1 = 0, taxabl
   value.income.push({ id: `income-${person}`, label: 'Regular income', person, startAge: 18, endAge: 120, annualAmount: amount, taxable });
 }
 
+describe('retirement pension link validation', () => {
+  const link = { accountCode: 'PENSION', person: 0 as const, share: 0.5, startYear: 2026 };
+
+  it('accepts legacy plans, empty links and retained disabled partner links', () => {
+    const value = plan();
+    expect(retirementPlanErrors(value)).toEqual([]);
+    value.pensionLinks = [];
+    expect(retirementPlanErrors(value)).toEqual([]);
+    value.pensionLinks = [link, { ...link, person: 1 }];
+    expect(retirementPlanErrors(value)).toEqual([]);
+  });
+
+  it.each([
+    null, {}, Array(21).fill(link), [null], [{ ...link, accountCode: '' }],
+    [{ ...link, accountCode: ' '.repeat(3) }], [{ ...link, accountCode: 'a'.repeat(101) }],
+    [{ ...link, person: 2 }], [{ ...link, share: 0 }], [{ ...link, share: -0.1 }],
+    [{ ...link, share: 1.01 }], [{ ...link, share: Number.NaN }],
+    [{ ...link, share: Number.POSITIVE_INFINITY }], [{ ...link, startYear: 1999 }],
+    [{ ...link, startYear: 2221 }], [{ ...link, startYear: 2026.5 }],
+    [link, link], [link, { ...link, person: 1, share: 0.6 }],
+  ].map(pensionLinks => ({ pensionLinks })))('rejects malformed, excessive, duplicate or overallocated links (%j)', ({ pensionLinks }) => {
+    expect(retirementPlanErrors({ ...plan(), pensionLinks }).length).toBeGreaterThan(0);
+  });
+
+  it('bounds the list at 20, accepts year bounds and tolerates only floating point allocation noise', () => {
+    const value = plan();
+    value.pensionLinks = Array.from({ length: 20 }, (_, index) => ({ ...link, accountCode: `P${index}`, share: 1, startYear: index % 2 ? 2000 : 2220 }));
+    expect(retirementPlanErrors(value)).toEqual([]);
+    value.pensionLinks = [link, { ...link, person: 1, share: 0.5000000005 }];
+    expect(retirementPlanErrors(value)).toEqual([]);
+    value.pensionLinks[1].share = 0.500000002;
+    expect(retirementPlanErrors(value).length).toBeGreaterThan(0);
+  });
+});
+
 describe('incomeTax', () => {
   it.each([[0, 0], [12570, 0], [50270, 7540], [100000, 27432], [110000, 33432], [125140, 42516], [150000, 53703]])('taxes £%s with the allowance, taper and bands', (gross, tax) => {
     expect(incomeTax(gross)).toBeCloseTo(tax, 6);
@@ -36,6 +72,43 @@ describe('incomeTax', () => {
 });
 
 describe('projectRetirement', () => {
+  it('replaces manual regular pension contributions from the first linked year, preserves other assets and stops at retirement', () => {
+    const value = plan();
+    value.people[0].retirementAge = 63;
+    value.endAge = 63;
+    value.people[0].assets.pension.annualContribution = 1000;
+    value.people[0].assets.pension.contributionGrowth = 0.1;
+    value.people[0].assets.isa.annualContribution = 200;
+    value.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2027 }];
+    value.oneOffs = [{ id: 'gift', label: 'Separate deposit', year: 2027, person: 0, asset: 'pension', amount: 500 }];
+    const source: PensionCashflow = { months: Array.from({ length: 24 }, (_, index) => `${2027 + Math.floor(index / 12)}-${String(index % 12 + 1).padStart(2, '0')}`), cashOut: [{ accountCode: 'PENSION', accountName: 'Pension', monthly: Array(24).fill(100), isProjected: Array(24).fill(true), hasOverride: Array(24).fill(false) }] };
+    const before = structuredClone({ value, source });
+    const rows = projectRetirement(value, 'base', source).years;
+    expect(rows.map(row => row.contributions)).toEqual([1200, 1400, 1400, 0]);
+    expect(rows.map(row => row.pension)).toEqual([1000, 2700, 3900, 3900]);
+    expect({ value, source }).toEqual(before);
+  });
+
+  it('does not require live data after retirement or for disabled partner links', () => {
+    const value = plan();
+    value.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }, { accountCode: 'PARTNER', person: 1, share: 1, startYear: 2026 }];
+    expect(projectRetirement(value, 'base').years[0].contributions).toBe(0);
+    value.pensionLinks = [value.pensionLinks[1]];
+    value.people[0].retirementAge = 61;
+    value.people[0].assets.pension.annualContribution = 300;
+    expect(projectRetirement(value, 'base').years[0].contributions).toBe(300);
+  });
+
+  it('requires live data for an active link and accepts zero linked contributions without using the manual amount', () => {
+    const value = plan();
+    value.people[0].retirementAge = 61;
+    value.people[0].assets.pension.annualContribution = 1000;
+    value.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }];
+    expect(() => projectRetirement(value, 'base')).toThrow(/cashflow/i);
+    const source: PensionCashflow = { months: ['2026-01'], cashOut: [{ accountCode: 'PENSION', accountName: 'Pension', monthly: [0], isProjected: [true], hasOverride: [false] }] };
+    expect(projectRetirement(value, 'base', source).years[0].contributions).toBe(0);
+  });
+
   it('builds a valid generic example for the requested year', () => {
     const example = createExampleRetirementPlan(2030);
     expect(example.startYear).toBe(2030);

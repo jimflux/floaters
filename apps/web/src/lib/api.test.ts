@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { getCashflow, patchVat, triggerSync, CASHFLOW_CACHE_KEY, saveRetirementPlan, getRetirementPlan } from "./api";
+import { getCashflow, patchVat, triggerSync, CASHFLOW_CACHE_KEY, saveRetirementPlan, getRetirementPlan, getRetirementPensionCashflow } from "./api";
 import { SignInRequiredError } from "./session";
 
 import { createExampleRetirementPlan } from './retirement';
@@ -88,6 +88,19 @@ describe("api requests", () => {
 });
 
 describe('retirement API requests', () => {
+  it('loads the full unexcluded pension window without changing normal cashflow defaults', async () => {
+    fetchMock.mockImplementation(async () => ok({ months: [], cashOut: [] }));
+    await getRetirementPensionCashflow();
+    await getCashflow();
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/cashflow?back=12&forward=24');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: 'same-origin', headers: { 'X-Floaters-Client': 'web' } });
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/cashflow?back=3&forward=12');
+  });
+  it('preserves the retirement draft on expired-session source refresh', async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 401 }));
+    await expect(getRetirementPensionCashflow()).rejects.toBeInstanceOf(SignInRequiredError);
+    expect(assign).not.toHaveBeenCalled();
+  });
   it('loads and saves the plain plan with the authenticated web contract', async () => {
     const plan = createExampleRetirementPlan();
     const saved = { plan, savedAt: '2026-10-14T12:00:00Z' };
