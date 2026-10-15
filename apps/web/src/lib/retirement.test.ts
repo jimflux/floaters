@@ -167,6 +167,8 @@ describe('projectRetirement', () => {
     const before = structuredClone({ value, source });
     const rows = projectRetirement(value, 'base', source).years;
     expect(rows.map(row => row.contributions)).toEqual([1200, 1400, 1400, 0]);
+    expect(rows.map(row => [row.contributionsByPerson[0].pension, row.contributionsByPerson[0].isa])).toEqual([[1000, 200], [1200, 200], [1200, 200], [0, 0]]);
+    expect(rows.every(row => Object.values(row.contributionsByPerson[1]).every(amount => amount === 0))).toBe(true);
     expect(rows.map(row => row.pension)).toEqual([1000, 2700, 3900, 3900]);
     expect({ value, source }).toEqual(before);
   });
@@ -179,6 +181,29 @@ describe('projectRetirement', () => {
     value.people[0].retirementAge = 61;
     value.people[0].assets.pension.annualContribution = 300;
     expect(projectRetirement(value, 'base').years[0].contributions).toBe(300);
+  });
+
+  it('reconciles each adult and pot to total contributions, including partial years and real growth', () => {
+    const value = plan();
+    value.partnerEnabled = true;
+    value.balanceDate = '2026-07-01';
+    value.endAge = 62;
+    value.people[0].retirementAge = 62;
+    value.people[1].retirementAge = 61;
+    value.people[0].assets.pension.annualContribution = 6000;
+    value.people[0].assets.isa.annualContribution = 2400;
+    value.people[0].assets.isa.contributionGrowth = 0.1;
+    value.people[1].assets.pension.annualContribution = 1200;
+    value.people[1].assets.isa.annualContribution = 600;
+    value.people[0].assets.cash.annualContribution = 300;
+    const rows = projectRetirement(value, 'base').years;
+    const fraction = (Date.UTC(2027, 0, 1) - Date.UTC(2026, 6, 1)) / (365 * 86400000);
+    expect(rows[0].contributionsByPerson[0].pension).toBeCloseTo(6000 * fraction, 8);
+    expect(rows[0].contributionsByPerson[1].isa).toBeCloseTo(600 * fraction, 8);
+    expect(rows[1].contributionsByPerson[0].isa).toBeCloseTo(2640, 8);
+    expect(rows[1].contributionsByPerson[1]).toEqual({ pension: 0, isa: 0, investments: 0, cash: 0 });
+    expect(rows[2].contributions).toBe(0);
+    for (const row of rows) expect(row.contributionsByPerson.flatMap(person => Object.values(person)).reduce((sum, amount) => sum + amount, 0)).toBeCloseTo(row.contributions, 8);
   });
 
   it('requires live data for an active link and accepts zero linked contributions without using the manual amount', () => {

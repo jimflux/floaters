@@ -145,6 +145,28 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('shows each adult’s annual pension and ISA contributions and hides the disabled partner columns', async () => {
+    const year = new Date().getFullYear();
+    const plan = createExampleRetirementPlan(year);
+    plan.balanceDate = `${year}-01-01`;
+    plan.people[0].assets.pension.annualContribution = 7200;
+    plan.people[0].assets.isa.annualContribution = 2400;
+    plan.people[1].assets.pension.annualContribution = 1800;
+    plan.people[1].assets.isa.annualContribution = 600;
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    fireEvent.click(screen.getByText('Annual breakdown'));
+    const table = screen.getByRole('table', { name: 'Annual retirement projection in today’s pounds' });
+    const headers = within(table).getAllByRole('columnheader').map(header => header.textContent);
+    const cells = within(within(table).getAllByRole('row')[1]).getAllByRole('cell');
+    for (const [name, amount] of [['Your pension contributions', '£7,200'], ['Your ISA contributions', '£2,400'], ['Partner pension contributions', '£1,800'], ['Partner ISA contributions', '£600']]) {
+      expect(cells[headers.indexOf(name) - 1]).toHaveTextContent(amount);
+    }
+    fireEvent.click(screen.getByLabelText('Include partner'));
+    expect(within(table).queryByRole('columnheader', { name: 'Partner pension contributions' })).not.toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Your ISA contributions' })).toBeInTheDocument();
+  });
   it('projects separate child pots to 18 and saves the age, monthly payments and growth inputs', async () => {
     const plan = createExampleRetirementPlan();
     plan.childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 1000, universityFund: 500 };
@@ -407,7 +429,7 @@ describe('RetirementPage', () => {
     expect(chart.compareDocumentPosition(balances) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText('You pension base return')).not.toBeVisible();
     expect(screen.getByLabelText('You pension contribution growth')).not.toBeVisible();
-    expect(screen.getByText(/^Year-end balances\./)).not.toBeVisible();
+    expect(screen.queryByRole('table', { name: 'Annual retirement projection in today’s pounds' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Advanced assumptions'));
     expect(screen.getByLabelText('You pension base return')).toBeVisible();
   });
@@ -497,6 +519,7 @@ describe('RetirementPage', () => {
     edit('You cash balance', '50000');
     expect(screen.getByTestId('projection-chart').textContent).not.toBe(before);
     fireEvent.change(screen.getByLabelText('Detail case'), { target: { value: 'cautious' } });
+    fireEvent.click(screen.getByText('Annual breakdown'));
     fireEvent.change(screen.getByLabelText('Selected year'), { target: { value: '2027' } });
     expect(screen.getByText(/Accessible assets in 2027/)).toBeInTheDocument();
   });
