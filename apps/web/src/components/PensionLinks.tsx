@@ -59,11 +59,11 @@ export function PensionLinks({ plan, onChange, source, loading, error, loadedAt,
         return <p role="alert" key={person} className="mt-3 text-sm">{failure instanceof Error ? failure.message : 'Could not calculate linked contributions.'} For missing history, update your baseline year, ages and opening balances, or link from a later year.</p>;
       }
     })}
-    <div className="mt-4 space-y-2 text-xs text-muted-foreground">
+    <details className="mt-4 space-y-2 text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold">How linked contributions work</summary>
       <p>Uses saved, unexcluded Floaters cashflow. Temporary what-if exclusions do not change this source. Known payments and projected monthly amounts are already combined: paid amounts are not added again.</p>
       <p>Beyond the last forecast month, the final monthly amount repeats. Your real pension contribution-growth assumption applies in subsequent calendar years. These extensions are estimates.</p>
-      <p>Opening balances are at 1 January: exclude contributions in linked years from those balances. Review an older workbook baseline, ages and balances before linking current payments. Do not also enter the same payments as one-offs. Linking does not query a pension provider balance or add company cash balances.</p>
+      <p>Balances use your chosen balance date. For a mid-month balance, linked contributions resume the following month; on the first day of a month, that month is included. Earlier payments are already covered by your balances. Do not also enter the same payments as one-offs. Linking does not query a pension provider balance or add company cash balances.</p>
       <p>Manual pension amounts are kept for years before links start and are restored when you disconnect. If the baseline predates the first link, the manual amount remains editable for those earlier years.</p>
-    </div>
+    </details>
   </section>;
 }

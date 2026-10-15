@@ -89,8 +89,13 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
   const people: { person: RetirementPerson; index: 0 | 1 }[] = [{ person: draft.people[0], index: 0 }];
   if (draft.partnerEnabled) people.push({ person: draft.people[1], index: 1 });
   const projection: RetirementProjection = { scenario, years: [], firstShortfall: null, assetsAtRetirement: null };
+  const yearStart = Date.UTC(draft.startYear, 0, 1);
+  const nextYearStart = Date.UTC(draft.startYear + 1, 0, 1);
+  const openingDate = draft.balanceDate ? Date.parse(`${draft.balanceDate}T00:00:00Z`) : yearStart;
+  const firstYearFraction = (nextYearStart - openingDate) / (nextYearStart - yearStart);
 
   for (let offset = 0; offset <= draft.endAge - draft.people[0].age; offset += 1) {
+    const yearFraction = offset === 0 ? firstYearFraction : 1;
     const year = draft.startYear + offset;
     const age = draft.people[0].age + offset;
     const states: PersonYear[] = people.map(({ person, index }) => ({ person, index, age: person.age + offset, taxableIncome: 0, pensionTaxable: 0 }));
@@ -103,10 +108,10 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     for (const state of states) {
       for (const key of RETIREMENT_ASSETS) {
         const asset = state.person.assets[key];
-        asset.balance = Math.max(0, asset.balance * (1 + asset.returns[scenario]));
+        asset.balance = Math.max(0, asset.balance * (1 + asset.returns[scenario]) ** yearFraction);
         if (state.age < state.person.retirementAge) {
           const linked = key === 'pension' ? pensionContributionForYear(draft, state.index, year, source) : null;
-          const contribution = linked?.amount ?? asset.annualContribution * (1 + asset.contributionGrowth) ** offset;
+          const contribution = linked?.amount ?? asset.annualContribution * (1 + asset.contributionGrowth) ** offset * yearFraction;
           asset.balance += contribution;
           contributions += contribution;
         }
@@ -116,10 +121,12 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     for (const row of draft.income) {
       const state = states[row.person];
       if (!state || state.age < row.startAge || state.age > row.endAge) continue;
-      income += row.annualAmount;
+      income += row.annualAmount * yearFraction;
+      // Keep annual income for pension marginal tax; regular tax below is
+      // apportioned over the remaining year at the same annual income rate.
       if (row.taxable) state.taxableIncome += row.annualAmount;
     }
-    tax = states.reduce((total, state) => total + incomeTax(state.taxableIncome), 0);
+    tax = states.reduce((total, state) => total + incomeTax(state.taxableIncome) * yearFraction, 0);
 
     // Apply deposits before withdrawals so paired rows do not depend on row order.
     const oneOffs = draft.oneOffs.filter(row => row.year === year && states[row.person]);
@@ -142,7 +149,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
       // These proceeds leave the portfolio. A transfer requires its own deposit.
     }
 
-    const spending = draft.spending.reduce((total, row) => total + (age >= row.startAge && age <= row.endAge ? row.annualAmount : 0), 0);
+    const spending = draft.spending.reduce((total, row) => total + (age >= row.startAge && age <= row.endAge ? row.annualAmount * yearFraction : 0), 0);
     let deficit = spending + tax - income;
     if (deficit < 0) {
       draft.people[0].assets.cash.balance -= deficit;

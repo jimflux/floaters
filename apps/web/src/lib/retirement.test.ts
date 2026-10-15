@@ -72,6 +72,66 @@ describe('incomeTax', () => {
 });
 
 describe('projectRetirement', () => {
+  it('projects forward from dated balances with only the remaining growth, savings, income and spending', () => {
+    const value = plan();
+    value.balanceDate = '2026-07-01';
+    value.people[0].retirementAge = 62;
+    value.endAge = 61;
+    value.people[0].assets.isa = { balance: 10000, annualContribution: 3650, contributionGrowth: 0, returns: { cautious: 0, base: 0.1, optimistic: 0.2 } };
+    income(value, 36500);
+    spend(value, 36500);
+    const before = structuredClone(value);
+    const rows = projectRetirement(value, 'base').years;
+    const remaining = 184 / 365;
+    expect(rows[0].contributions).toBeCloseTo(3650 * remaining, 6);
+    expect(rows[0].income).toBeCloseTo(36500 * remaining, 6);
+    expect(rows[0].spending).toBeCloseTo(36500 * remaining, 6);
+    expect(rows[0].tax).toBeCloseTo(incomeTax(36500) * remaining, 6);
+    expect(rows[0].isa).toBeCloseTo(10000 * 1.1 ** remaining + 3650 * remaining - incomeTax(36500) * remaining, 6);
+    expect(rows[1].contributions).toBe(3650);
+    expect(value).toEqual(before);
+  });
+
+  it.each([
+    { date: '2026-10-01', months: ['2026-10', '2026-11', '2026-12'], amounts: [100, 200, 300], expected: 600 },
+    { date: '2026-10-15', months: ['2026-11', '2026-12'], amounts: [200, 300], expected: 500 },
+    { date: '2026-12-01', months: ['2026-12'], amounts: [300], expected: 300 },
+    { date: '2026-12-15', months: ['2026-12'], amounts: [300], expected: 0 },
+  ])('uses only uncovered linked payment months after $date and resets the next year', ({ date, months, amounts, expected }) => {
+    const value = plan();
+    value.balanceDate = date;
+    value.people[0].retirementAge = 62;
+    value.endAge = 61;
+    value.people[0].assets.pension.balance = 10000;
+    value.people[0].assets.pension.annualContribution = 9999;
+    value.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }];
+    const source: PensionCashflow = { months, cashOut: [{ accountCode: 'PENSION', accountName: 'Pension', monthly: amounts, isProjected: months.map(() => true), hasOverride: months.map(() => false) }] };
+    const rows = projectRetirement(value, 'base', source).years;
+    expect(rows[0]).toMatchObject({ pension: 10000 + expected, contributions: expected });
+    expect(rows[1].contributions).toBe(3600);
+    if (date === '2026-12-15') {
+      expect(projectRetirement({ ...value, endAge: value.people[0].age }, 'base').years[0]).toMatchObject({ pension: 10000, contributions: 0 });
+    }
+  });
+
+  it('accepts legacy January balances and validates the full balance date against the baseline year', () => {
+    const value = plan();
+    value.people[0].retirementAge = 61;
+    value.people[0].assets.isa = { balance: 10000, annualContribution: 1000, contributionGrowth: 0, returns: { cautious: 0, base: 0.1, optimistic: 0.2 } };
+    const legacy = structuredClone(value);
+    expect(retirementPlanErrors(value)).toEqual([]);
+    value.balanceDate = '2026-01-01';
+    expect(projectRetirement(value, 'base')).toEqual(projectRetirement(legacy, 'base'));
+    expect(projectRetirement(value, 'base').years[0].isa).toBe(12000);
+    for (const date of ['', '2026-02-30', '2026-13-01', '2025-10-15', '2026-1-1']) {
+      value.balanceDate = date;
+      expect(retirementPlanErrors(value).some(error => /balance date/i.test(error))).toBe(true);
+    }
+    value.startYear = 2028;
+    value.balanceDate = '2028-02-29';
+    expect(retirementPlanErrors(value)).toEqual([]);
+  });
+
   it('replaces manual regular pension contributions from the first linked year, preserves other assets and stops at retirement', () => {
     const value = plan();
     value.people[0].retirementAge = 63;

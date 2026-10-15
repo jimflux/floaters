@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExampleRetirementPlan } from '@/lib/retirement';
 import { SignInRequiredError } from '@/lib/session';
 import type { RetirementSavedPlan } from '@floaters/types';
@@ -21,6 +21,7 @@ beforeEach(() => {
   mocks.save.mockImplementation(async plan => ({ plan, savedAt: '2026-10-14T12:00:00Z' }));
 });
 async function ready() { render(<RetirementPage />); await screen.findByText(/Example plan.*invented/i); }
+afterEach(() => vi.useRealTimers());
 function edit(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
 
 function pensionSource(amount = 100) {
@@ -64,7 +65,7 @@ describe('linked pensions', () => {
     addPensionLink();
     expect(screen.getByText(/£1,200.*estimated/i)).toBeInTheDocument();
     const earlier = String(new Date().getFullYear() - 1);
-    edit('Baseline year', earlier);
+    edit('Balances as of', `${earlier}-01-01`);
     expect(screen.getByLabelText('You pension annual contribution')).toBeEnabled();
     edit('Pension link 1 starting year', earlier);
     expect(screen.queryByTestId('projection-chart')).not.toBeInTheDocument();
@@ -142,6 +143,73 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('puts the chart first and keeps return assumptions and annual calculations closed', async () => {
+    await ready();
+    const chart = screen.getByRole('heading', { name: 'Projected assets by age' });
+    const balances = screen.getByRole('heading', { name: 'Pension & ISA balances' });
+    expect(chart.compareDocumentPosition(balances) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByLabelText('You pension base return')).not.toBeVisible();
+    expect(screen.getByLabelText('You pension contribution growth')).not.toBeVisible();
+    expect(screen.getByText(/^Year-end balances\./)).not.toBeVisible();
+    fireEvent.click(screen.getByText('Advanced assumptions'));
+    expect(screen.getByLabelText('You pension base return')).toBeVisible();
+  });
+
+  it('shows age today and saves dated JPM balances without changing the retained return assumptions', async () => {
+    vi.setSystemTime(new Date('2026-10-15T12:00:00Z'));
+    const plan = createExampleRetirementPlan(2024);
+    plan.people[0].age = 39;
+    plan.people[1].age = 37;
+    mocks.get.mockResolvedValue({ plan, savedAt: '2026-10-14T12:00:00Z' });
+    render(<RetirementPage />);
+    expect(await screen.findByLabelText('You current age')).toHaveValue(41);
+    expect(screen.getByLabelText('Balances as of')).toHaveValue('2024-01-01');
+    edit('You current age', '42');
+    expect(screen.getByLabelText('You current age')).toHaveValue(42);
+    edit('You current age', '41');
+    fireEvent.click(screen.getByRole('button', { name: 'Use today' }));
+    expect(screen.getByLabelText('Balances as of')).toHaveValue('2026-10-15');
+    expect(screen.getByLabelText('You current age')).toHaveValue(41);
+    expect(screen.getByLabelText('Partner current age')).toHaveValue(39);
+    edit('You pension balance', '250000');
+    edit('You isa balance', '40000');
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save balances' }));
+    await screen.findByText('Plan saved.');
+    const saved = mocks.save.mock.calls[0][0];
+    expect(saved).toMatchObject({ startYear: 2026, balanceDate: '2026-10-15' });
+    expect(saved.people[0].age).toBe(41);
+    expect(saved.people[1].age).toBe(39);
+    expect(saved.people[0].assets.pension.balance).toBe(250000);
+    expect(saved.people[0].assets.isa.balance).toBe(40000);
+    expect(saved.people[0].assets.pension.returns).toEqual(plan.people[0].assets.pension.returns);
+    expect(saved.people[0].assets.cash).toEqual(plan.people[0].assets.cash);
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0].age).toBe(41);
+  });
+
+  it('preserves unsaved balances across a calendar-year change without refetching the plan', async () => {
+    vi.setSystemTime(new Date('2026-12-31T12:00:00Z'));
+    const plan = createExampleRetirementPlan(2026);
+    mocks.get.mockResolvedValue({ plan, savedAt: '2026-12-30T12:00:00Z' });
+    const view = render(<RetirementPage />);
+    await screen.findByLabelText('You pension balance');
+    edit('You pension balance', '250000');
+    vi.setSystemTime(new Date('2027-01-01T12:00:00Z'));
+    await act(async () => { view.rerender(<RetirementPage />); });
+    expect(screen.getByLabelText('You pension balance')).toHaveValue(250000);
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(mocks.get).toHaveBeenCalledOnce();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('requires a balance date and blocks saving an undated update', async () => {
+    await ready();
+    edit('Balances as of', '');
+    expect(screen.getByRole('alert')).toHaveTextContent(/balance date/i);
+    expect(screen.getByRole('button', { name: 'Save balances' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeDisabled();
+  });
+
   it('loads first, then presents a clearly unsaved example without autosaving', async () => {
     let resolve!: (value: RetirementSavedPlan) => void;
     mocks.get.mockReturnValue(new Promise<RetirementSavedPlan>(done => { resolve = done; }));
@@ -159,7 +227,7 @@ describe('RetirementPage', () => {
     mocks.get.mockResolvedValue({ plan, savedAt: '2026-10-14T12:00:00Z' });
     render(<RetirementPage />);
     expect(await screen.findByDisplayValue('Saved example')).toBeInTheDocument();
-    expect(screen.getByLabelText('Baseline year')).toHaveValue(2025);
+    expect(screen.getByLabelText('Balances as of')).toHaveValue('2025-01-01');
     expect(screen.getByText('Saved')).toBeInTheDocument();
     edit('You name', 'Edited example');
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
@@ -271,7 +339,7 @@ describe('RetirementPage', () => {
     Object.defineProperty(file, 'arrayBuffer', { value: vi.fn().mockResolvedValue(new ArrayBuffer(4)) });
     fireEvent.change(screen.getByLabelText('Workbook file'), { target: { files: [file] } });
     await screen.findByDisplayValue('Imported example');
-    expect(screen.getByLabelText('Baseline year')).toHaveValue(2024);
+    expect(screen.getByLabelText('Balances as of')).toHaveValue('2024-01-01');
     expect(screen.getByText(/This workbook starts in 2024/)).toBeInTheDocument();
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
     expect(mocks.save).not.toHaveBeenCalled();
@@ -309,7 +377,7 @@ describe('RetirementPage', () => {
     Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue('synthetic JSON') });
     fireEvent.change(screen.getByLabelText('JSON plan file'), { target: { files: [file] } });
     await screen.findByDisplayValue('JSON example');
-    expect(screen.getByLabelText('Baseline year')).toHaveValue(2023);
+    expect(screen.getByLabelText('Balances as of')).toHaveValue('2023-01-01');
     expect(mocks.json).toHaveBeenCalledWith('synthetic JSON');
     expect(mocks.save).not.toHaveBeenCalled();
     expect(screen.getByLabelText('JSON plan file')).toHaveValue('');
