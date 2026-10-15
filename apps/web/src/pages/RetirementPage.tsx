@@ -14,9 +14,11 @@ import { PensionLinks } from '@/components/PensionLinks';
 import { usePensionCashflow } from '@/hooks/usePensionCashflow';
 import { milestoneLanes, retirementMilestones } from '@/lib/retirement-milestones';
 import { RetirementMilestoneMarker } from '@/components/RetirementMilestoneMarker';
+import { ChildSavingsProjection } from '@/components/ChildSavingsProjection';
+import { DEFAULT_CHILD_GROWTH } from '@/lib/child-savings';
 
 const INPUT = 'w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-iris';
-const CARD = 'rounded-xl bg-card p-3 shadow-sm shadow-aubergine/5 sm:p-4';
+const CARD = 'min-w-0 rounded-xl bg-card p-3 shadow-sm shadow-aubergine/5 sm:p-4';
 const CASE_LABEL: Record<RetirementCase, string> = { cautious: 'Cautious', base: 'Base', optimistic: 'Optimistic' };
 const CASE_COLOR: Record<RetirementCase, string> = { cautious: 'hsl(var(--coral))', base: 'hsl(var(--iris-deep))', optimistic: 'hsl(var(--aubergine))' };
 const STRESS_LABEL: Record<RetirementStress, string> = { none: 'Normal outlook', 'market-drop': 'Market drop at retirement', 'weak-returns': 'Ten difficult investment years', 'later-state-pension': 'State Pension two years later', 'lose-you': 'Partner survives you', 'lose-partner': 'You survive your partner' };
@@ -194,7 +196,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  return <main className="min-h-screen bg-background pb-28 text-foreground">
+  return <main className="mx-auto min-h-screen w-full max-w-[1440px] bg-background pb-28 text-foreground">
     <header className="flex flex-col justify-between gap-3 bg-aubergine px-3 py-3 text-cloud sm:px-4 lg:flex-row lg:items-center">
       <div><h1 className="font-display text-2xl font-extrabold tracking-tight text-cloud">Retirement planner</h1><p className="mt-1 text-sm text-cloud/75">Your retirement outlook · Update your JPM balances whenever you like</p></div>
       <div className="flex flex-wrap gap-2">
@@ -261,6 +263,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
 
         {!!inputNotes.length && <details className={`${CARD} border border-sun/50`}><summary className="cursor-pointer font-semibold">Inputs to check · {inputNotes.length}</summary><ul className="mt-3 list-disc space-y-2 pl-5 text-sm">{inputNotes.map(note => <li key={note}>{note}</li>)}</ul></details>}
 
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section className={CARD} aria-labelledby="balance-inputs">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><h2 id="balance-inputs" className="font-display text-xl font-bold">Pension &amp; ISA balances</h2><p className="mt-1 text-sm text-muted-foreground">Copy the balances from JPM whenever you want to update your plan.</p></div>
@@ -296,25 +299,36 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
 
         <section className={`${CARD} border border-iris/20`} aria-labelledby="child-savings">
           <h2 id="child-savings" className="break-words font-display text-xl font-bold">{plan.childSavings?.name.trim() ? `${plan.childSavings.name}’s savings` : 'Children’s savings'}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Tracked separately from your retirement forecast and household spending. These balances save with the rest of your plan.</p>
-          {plan.childSavings ? <div className="mt-3 grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(8rem,1fr)_10rem_minmax(7rem,1fr)_minmax(7rem,1fr)_auto]">
+          <p className="mt-1 text-xs text-muted-foreground">Her own plan to 18, separate from your retirement and spending.</p>
+          {plan.childSavings ? <>
+          <ChildSavingsProjection savings={plan.childSavings} />
+          <div className="mt-3 grid items-end gap-2 sm:grid-cols-2">
             <TextField label="Child’s name" value={plan.childSavings.name} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.name = value; })} />
             <label className="block text-xs font-semibold text-muted-foreground">Balances as of<input aria-label="Child balances as of" type="date" className={`${INPUT} mt-1`} value={plan.childSavings.balanceDate} onChange={event => edit(draft => { if (draft.childSavings) draft.childSavings.balanceDate = event.target.value; })} /></label>
+            <NumberField label="Child age at balance date" value={plan.childSavings.ageAtBalanceDate ?? NaN} onChange={value => edit(draft => { if (draft.childSavings) { if (Number.isNaN(value)) delete draft.childSavings.ageAtBalanceDate; else draft.childSavings.ageAtBalanceDate = value; } })} />
+            <NumberField label="Child monthly uni contribution" value={plan.childSavings.monthlyUniContribution ?? 0} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.monthlyUniContribution = value; })} />
             <NumberField label="Child JISA balance" value={plan.childSavings.jisa} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.jisa = value; })} />
             <NumberField label="Child uni fund balance" value={plan.childSavings.universityFund} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.universityFund = value; })} />
-            <div className="flex items-center gap-3"><p className="text-xs text-muted-foreground">Total saved <strong className="block text-lg tabular-nums text-foreground">{Number.isFinite(plan.childSavings.jisa + plan.childSavings.universityFund) ? money(plan.childSavings.jisa + plan.childSavings.universityFund) : '—'}</strong></p><Button className="h-8 px-3" disabled={!valid || !dirty || saving || importing} onClick={save}>{saving ? 'Saving…' : 'Save child savings'}</Button></div>
-          </div> : <Button className="mt-2 h-8 px-3" variant="outline" onClick={() => edit(draft => { draft.childSavings = { name: 'Child', balanceDate: today, jisa: 0, universityFund: 0 }; })}>Add child savings</Button>}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Total saved now <strong className="ml-1 tabular-nums text-foreground">{Number.isFinite(plan.childSavings.jisa + plan.childSavings.universityFund) ? money(plan.childSavings.jisa + plan.childSavings.universityFund) : '—'}</strong></p><Button className="h-8 px-3" disabled={!valid || !dirty || saving || importing} onClick={save}>{saving ? 'Saving…' : 'Save child savings'}</Button></div>
+          <details className="mt-2 border-t border-border pt-2"><summary className="cursor-pointer text-xs font-semibold">Growth assumptions</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <NumberField label="Child JISA annual growth" percent value={plan.childSavings.jisaAnnualReturn ?? DEFAULT_CHILD_GROWTH} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.jisaAnnualReturn = value; })} />
+            <NumberField label="Child uni fund annual growth" percent value={plan.childSavings.universityAnnualReturn ?? DEFAULT_CHILD_GROWTH} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.universityAnnualReturn = value; })} />
+          </div><p className="mt-2 text-xs text-muted-foreground">Monthly payments stay fixed and are added after each month’s growth, starting after the balance date. Returns are illustrations; costs are included in the entered growth rate. No separate fee or tax deduction is applied.</p></details>
+          </> : <Button className="mt-2 h-8 px-3" variant="outline" onClick={() => edit(draft => { draft.childSavings = { name: 'Child', balanceDate: today, jisa: 0, universityFund: 0 }; })}>Add child savings</Button>}
         </section>
+        </div>
 
+        <PensionLinks plan={plan} onChange={links => edit(draft => { draft.pensionLinks = links; })} source={pension.source} loading={pension.loading} error={pension.error} loadedAt={pension.loadedAt} onRefresh={() => void pension.refresh()} />
+        {projectionError && <p role="alert" className="rounded-tile bg-destructive/10 p-4">Projection unavailable: {projectionError} For missing history, update your balance date and balances, or link from a later year.</p>}
+
+        <div className="grid items-start gap-3 md:grid-cols-2">
         <details className={CARD}><summary className="cursor-pointer font-display text-xl font-bold">Projection settings</summary>
-          <div className="mt-2 grid gap-3 sm:grid-cols-3">
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <NumberField label="Your minimum end age" value={plan.endAge} onChange={value => edit(draft => { draft.endAge = value; })} />
             <NumberField label="Youngest adult planning age" value={plan.longevityAge ?? Math.min(...plan.people.filter((_, i) => i === 0 || plan.partnerEnabled).map(person => person.age)) + plan.endAge - plan.people[0].age} onChange={value => edit(draft => { draft.longevityAge = value; })} />
           </div>
         </details>
-
-        <PensionLinks plan={plan} onChange={links => edit(draft => { draft.pensionLinks = links; })} source={pension.source} loading={pension.loading} error={pension.error} loadedAt={pension.loadedAt} onRefresh={() => void pension.refresh()} />
-        {projectionError && <p role="alert" className="rounded-tile bg-destructive/10 p-4">Projection unavailable: {projectionError} For missing history, update your balance date and balances, or link from a later year.</p>}
 
         <details className={CARD}><summary className="cursor-pointer font-display text-xl font-bold">Advanced assumptions</summary>
           <p className="mt-3 text-sm text-muted-foreground">These assumptions drive the forecast. Fees include management and underlying fund charges; confirm them against your provider. Gross returns are converted to today’s pounds using compounded fees and inflation. Tiered fees follow each pot’s projected nominal value; past charges are already reflected in the opening balance. Existing net-return overrides are used as entered.</p>
@@ -340,9 +354,12 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
           </div>)}
         </details>
 
-        <section className={CARD}><div className="flex items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">Regular income</h2><Button variant="outline" onClick={() => edit(draft => { draft.income.push({ id: rowId(), label: 'New income', person: 0, startAge: draft.people[0].retirementAge, endAge: 120, annualAmount: 0, taxable: true }); })}>Add income</Button></div>
+        </div>
+
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+        <section className={CARD}><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">Regular income</h2><Button variant="outline" onClick={() => edit(draft => { draft.income.push({ id: rowId(), label: 'New income', person: 0, startAge: draft.people[0].retirementAge, endAge: 120, annualAmount: 0, taxable: true }); })}>Add income</Button></div>
           <p className="mt-2 text-sm text-muted-foreground">Gross annual amounts; age limits apply to the person receiving the income, including both end ages.</p>
-          <div className="mt-2 space-y-4">{plan.income.map((row, index) => <div key={row.id} className="grid items-end gap-3 rounded-tile bg-cloud p-3 sm:grid-cols-2 xl:grid-cols-7">
+          <div className="mt-2 space-y-3">{plan.income.map((row, index) => <div key={row.id} className="grid items-end gap-2 rounded-lg bg-cloud p-2.5 sm:grid-cols-3">
             <TextField label={`Income ${index + 1} label`} value={row.label} onChange={value => edit(draft => { draft.income[index].label = value; })} />
             <label className="text-xs font-semibold text-muted-foreground">Person<select aria-label={`Income ${index + 1} person`} className={`${INPUT} mt-1`} value={row.person} onChange={event => edit(draft => { draft.income[index].person = Number(event.target.value) as 0 | 1; })}><option value={0}>You</option><option value={1}>{plan.partnerEnabled ? 'Partner' : 'Partner (ignored)'}</option></select></label>
             <NumberField label={`Income ${index + 1} start age`} value={row.startAge} onChange={value => edit(draft => { draft.income[index].startAge = value; })} />
@@ -353,9 +370,9 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
           </div>)}</div>
         </section>
 
-        <section className={CARD}><div className="flex items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">Household spending</h2><Button variant="outline" onClick={() => edit(draft => { draft.spending.push({ id: rowId(), label: 'New spending', startAge: draft.people[0].retirementAge, endAge: draft.endAge, annualAmount: 0 }); })}>Add spending</Button></div>
+        <section className={CARD}><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">Household spending</h2><Button variant="outline" onClick={() => edit(draft => { draft.spending.push({ id: rowId(), label: 'New spending', startAge: draft.people[0].retirementAge, endAge: draft.endAge, annualAmount: 0 }); })}>Add spending</Button></div>
           <p className="mt-2 text-sm text-muted-foreground">Annual household amounts; age limits refer to your age.</p>
-          <div className="mt-2 space-y-4">{plan.spending.map((row, index) => <div key={row.id} className="grid items-end gap-3 rounded-tile bg-cloud p-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-2 space-y-3">{plan.spending.map((row, index) => <div key={row.id} className="grid items-end gap-2 rounded-lg bg-cloud p-2.5 sm:grid-cols-3">
             <TextField label={`Spending ${index + 1} label`} value={row.label} onChange={value => edit(draft => { draft.spending[index].label = value; })} />
             <NumberField label={`Spending ${index + 1} start age`} value={row.startAge} onChange={value => edit(draft => { draft.spending[index].startAge = value; })} />
             <NumberField label={`Spending ${index + 1} end age`} value={row.endAge} onChange={value => edit(draft => { draft.spending[index].endAge = value; })} />
@@ -363,10 +380,11 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
             <Button variant="ghost" aria-label={`Remove spending ${index + 1}`} onClick={() => edit(draft => { draft.spending.splice(index, 1); })}>Remove</Button>
           </div>)}</div>
         </section>
+        </div>
 
-        <section className={CARD}><div className="flex items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">One-offs</h2><Button variant="outline" onClick={() => edit(draft => { draft.oneOffs.push({ id: rowId(), label: 'New one-off', person: 0, asset: 'cash', year: draft.startYear, amount: 0 }); })}>Add one-off</Button></div>
+        <section className={CARD}><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">One-offs</h2><Button variant="outline" onClick={() => edit(draft => { draft.oneOffs.push({ id: rowId(), label: 'New one-off', person: 0, asset: 'cash', year: draft.startYear, amount: 0 }); })}>Add one-off</Button></div>
           <p className="mt-2 text-sm text-muted-foreground">Positive amounts deposit into a bucket; negative amounts leave the portfolio. A transfer needs a matching deposit. Pension withdrawals require access age and may create additional tax.</p>
-          <div className="mt-2 space-y-4">{plan.oneOffs.map((row, index) => <div key={row.id} className="grid items-end gap-3 rounded-tile bg-cloud p-3 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="mt-2 grid gap-3 lg:grid-cols-2">{plan.oneOffs.map((row, index) => <div key={row.id} className="grid items-end gap-2 rounded-lg bg-cloud p-2.5 sm:grid-cols-3">
             <TextField label={`One-off ${index + 1} label`} value={row.label} onChange={value => edit(draft => { draft.oneOffs[index].label = value; })} />
             <label className="text-xs font-semibold text-muted-foreground">Person<select aria-label={`One-off ${index + 1} person`} className={`${INPUT} mt-1`} value={row.person} onChange={event => edit(draft => { draft.oneOffs[index].person = Number(event.target.value) as 0 | 1; })}><option value={0}>You</option><option value={1}>{plan.partnerEnabled ? 'Partner' : 'Partner (ignored)'}</option></select></label>
             <label className="text-xs font-semibold text-muted-foreground">Asset<select aria-label={`One-off ${index + 1} asset`} className={`${INPUT} mt-1`} value={row.asset} onChange={event => edit(draft => { draft.oneOffs[index].asset = event.target.value as typeof row.asset; })}>{RETIREMENT_ASSETS.map(key => <option key={key} value={key}>{ASSET_LABEL[key]}</option>)}</select></label>
@@ -387,7 +405,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
         </div></details>
       </fieldset>}
     </div>
-    {ready && active && <section aria-label="Plan saving" className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-3 py-3 shadow-lg sm:px-4">
+    {ready && active && <section aria-label="Plan saving" className="fixed inset-x-0 bottom-0 z-40 mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-3 py-3 shadow-lg sm:px-4">
       <div className="min-w-0 text-sm">
         <p role="status" className="font-semibold">{saving ? 'Saving and checking your changes…' : saveError ? 'Save failed. Your changes are still here.' : dirty ? 'Changes waiting to be saved' : saveSuccess ? 'All changes saved to database' : 'Plan loaded from database'}</p>
         <p className="text-xs text-muted-foreground">{!valid ? errors[0] ?? 'Fix the highlighted inputs to save.' : dirty ? 'Save applies to your whole retirement plan.' : savedAt ? `Last saved ${new Date(savedAt).toLocaleString('en-GB')}` : 'No unsaved changes.'}</p>
