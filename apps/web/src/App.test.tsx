@@ -7,9 +7,9 @@ vi.mock('./pages/CashflowPage', () => ({ default: function Cashflow() {
   const [value, setValue] = useState('Cashflow draft');
   return <input aria-label="Cashflow state" value={value} onChange={event => setValue(event.target.value)} />;
 } }));
-vi.mock('./pages/RetirementPage', () => ({ default: function Retirement() {
+vi.mock('./pages/RetirementPage', () => ({ default: function Retirement({ active }: { active: boolean }) {
   const [value, setValue] = useState('Retirement draft');
-  return <input aria-label="Retirement state" value={value} onChange={event => setValue(event.target.value)} />;
+  return <input data-active={active} aria-label="Retirement state" value={value} onChange={event => setValue(event.target.value)} />;
 } }));
 import App from './App';
 beforeEach(() => { window.history.replaceState(null, '', '/'); });
@@ -23,9 +23,11 @@ describe('top-level tabs', () => {
     fireEvent.change(screen.getByLabelText('Retirement state'), { target: { value: 'Preserved retirement' } });
     fireEvent.click(screen.getByRole('tab', { name: 'Cashflow' }));
     expect(screen.getByLabelText('Cashflow state')).toHaveValue('Preserved cashflow');
+    expect(screen.getByLabelText('Retirement state')).toHaveAttribute('data-active', 'false');
     expect(screen.getByRole('tab', { name: 'Cashflow' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('tab', { name: 'Retirement' }));
     expect(screen.getByLabelText('Retirement state')).toHaveValue('Preserved retirement');
+    expect(screen.getByLabelText('Retirement state')).toHaveAttribute('data-active', 'true');
   });
   it('opens a #retirement direct link', () => {
     window.history.replaceState(null, '', '/#retirement');

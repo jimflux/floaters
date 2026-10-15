@@ -1,6 +1,7 @@
 import type { CashflowData, AccountGroup, PipelineResponse, TimeTrackingResponse } from './types';
 import { clearSignInGuard, handleUnauthorised, SignInRequiredError } from './session';
 import { clearCachedData } from './cache';
+import type { PensionCashflow } from './retirement-pensions';
 import type { RetirementPlan, RetirementSavedPlan } from '@floaters/types';
 
 export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
@@ -44,6 +45,13 @@ function apiFetch(path: string, init: RequestInit & { headers?: Record<string, s
     }
     clearSignInGuard();
     return res;
+  });
+}
+
+export function getRetirementPensionCashflow(): Promise<PensionCashflow> {
+  return apiFetch('/api/cashflow?back=12&forward=24', {}, false).then(res => {
+    if (!res.ok) throw new Error(`Could not load pension cashflow: ${res.status}`);
+    return res.json();
   });
 }
 
