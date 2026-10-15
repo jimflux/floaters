@@ -145,6 +145,96 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  function fireFixture() {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.balanceDate = `${plan.startYear}-01-01`;
+    plan.partnerEnabled = false;
+    delete plan.longevityAge;
+    plan.inflation = 0;
+    plan.endAge = 50;
+    plan.people[0].age = 40;
+    plan.people[0].retirementAge = 48;
+    for (const person of plan.people) for (const asset of Object.values(person.assets)) {
+      asset.balance = 0; asset.annualContribution = 0; asset.contributionGrowth = 0;
+      asset.returns = { cautious: 0, base: 0, optimistic: 0 };
+      delete asset.grossReturns; delete asset.feeSchedule;
+    }
+    plan.people[0].assets.cash.annualContribution = 1000;
+    plan.income = [{ id: 'job', label: 'Part Time Work', person: 0, startAge: 48, endAge: 49, annualAmount: 500, taxable: true }];
+    plan.spending = [{ id: 'costs', label: 'Living costs', startAge: 48, endAge: 50, annualAmount: 1000 }];
+    plan.oneOffs = [{ id: 'gift', label: 'Later gift', person: 0, asset: 'cash', year: plan.startYear + 10, amount: 100 }];
+    plan.childSavings = { name: 'Example child', balanceDate: plan.balanceDate, jisa: 1000, universityFund: 500 };
+    return plan;
+  }
+
+  it('previews FIRE with work by default, switches cases, and exits without changing the saved plan', async () => {
+    const plan = fireFixture();
+    mocks.get.mockResolvedValue({ plan, savedAt: '2026-10-14T12:00:00Z' });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    const original = screen.getByTestId('projection-chart').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Wild mode · FIRE' }));
+    expect(screen.getByLabelText('FIRE paid work')).toHaveValue('keep');
+    expect(screen.getByLabelText('FIRE retirement age')).toHaveValue('44');
+    expect(screen.getByLabelText('You retirement age')).toHaveValue(48);
+    expect(screen.getByText(/Semi-retirement: planned work income is included/)).toBeInTheDocument();
+    expect(screen.getByTestId('projection-chart').textContent).not.toBe(original);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Earliest · base with 30% crash/ }));
+    expect(screen.getByLabelText('Stress test')).toHaveValue('market-drop');
+    fireEvent.click(screen.getByRole('button', { name: /Earliest · cautious/ }));
+    expect(screen.getByLabelText('Detail case')).toHaveValue('cautious');
+    expect(screen.getByLabelText('Stress test')).toHaveValue('none');
+    edit('FIRE paid work', 'stop');
+    fireEvent.click(screen.getByRole('button', { name: /^Earliest · base Age/ }));
+    expect(screen.getByLabelText('FIRE retirement age')).toHaveValue('46');
+    edit('FIRE retirement age', '47');
+    expect(screen.getByText(/FIRE preview: retire at 47/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retirement plan' }));
+    expect(screen.getByTestId('projection-chart').textContent).toBe(original);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('applies a FIRE preview to the draft and saves the whole revised plan only on explicit Save', async () => {
+    const plan = fireFixture();
+    const before = structuredClone(plan);
+    mocks.get.mockResolvedValue({ plan, savedAt: '2026-10-14T12:00:00Z' });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    fireEvent.click(screen.getByRole('button', { name: 'Wild mode · FIRE' }));
+    edit('FIRE retirement age', '45');
+    fireEvent.click(screen.getByRole('button', { name: 'Use this retirement age' }));
+    expect(screen.getByLabelText('You retirement age')).toHaveValue(45);
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+    const saved = mocks.save.mock.calls[0][0];
+    expect(saved.people[0].retirementAge).toBe(45);
+    expect(saved.income[0]).toMatchObject({ startAge: 45, endAge: 49, annualAmount: 500, kind: 'employment' });
+    expect(saved.spending).toContainEqual(expect.objectContaining({ label: 'FIRE living costs', startAge: 45, endAge: 47, annualAmount: 1000 }));
+    expect(saved.people[0].assets).toEqual(before.people[0].assets);
+    expect(saved.people[0].pensionAccessAge).toBe(before.people[0].pensionAccessAge);
+    expect(saved.people[1]).toEqual(before.people[1]);
+    expect(saved.oneOffs).toEqual(before.oneOffs);
+    expect(saved.childSavings).toEqual(before.childSavings);
+    expect(plan).toEqual(before);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
+  it('requires a complete spending budget before reporting any FIRE age', async () => {
+    const plan = fireFixture();
+    plan.spending[0].endAge = 49;
+    mocks.get.mockResolvedValue({ plan, savedAt: '2026-10-14T12:00:00Z' });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    fireEvent.click(screen.getByRole('button', { name: 'Wild mode · FIRE' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Add household spending at age 50');
+    expect(screen.queryByRole('button', { name: 'Use this retirement age' })).not.toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
   it('shows each adult’s annual pension and ISA contributions and hides the disabled partner columns', async () => {
     const year = new Date().getFullYear();
     const plan = createExampleRetirementPlan(year);
