@@ -9,8 +9,9 @@ vi.mock('@/lib/api', () => ({ getRetirementPlan: mocks.get, saveRetirementPlan: 
 vi.mock('@/lib/retirement-import', () => ({ importRetirementWorkbook: mocks.workbook, importRetirementJson: mocks.json, MAX_RETIREMENT_FILE_BYTES: 5 * 1024 * 1024 }));
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  LineChart: ({ data }: { data: unknown[] }) => <div data-testid="projection-chart">{JSON.stringify(data)}</div>,
-  Line: () => null, XAxis: () => null, YAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Legend: () => null,
+  LineChart: ({ data, children }: { data: unknown[]; children: React.ReactNode }) => <><div data-testid="projection-chart">{JSON.stringify(data)}</div>{children}</>,
+  YAxis: ({ domain, allowDataOverflow }: { domain: unknown[]; allowDataOverflow: boolean }) => <div data-testid="chart-axis" data-domain={JSON.stringify(domain)} data-clips={String(allowDataOverflow)} />,
+  Line: () => null, XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Legend: () => null,
 }));
 import RetirementPage from './RetirementPage';
 
@@ -143,6 +144,53 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('focuses the scale on base while preserving full optimistic values and saved inputs', async () => {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.partnerEnabled = false;
+    plan.people[0].age = 40;
+    plan.people[0].retirementAge = 80;
+    plan.endAge = 60;
+    delete plan.longevityAge;
+    plan.income = []; plan.spending = []; plan.oneOffs = [];
+    for (const asset of Object.values(plan.people[0].assets)) {
+      asset.balance = 0; asset.annualContribution = 0;
+      asset.returns = { cautious: 0, base: 0, optimistic: 0.2 };
+      delete asset.grossReturns;
+    }
+    plan.people[0].assets.isa.balance = 10000;
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    const values = screen.getByTestId('projection-chart').textContent;
+    expect(JSON.parse(values!).at(-1).optimistic).toBeGreaterThan(400000);
+    expect(screen.getByText(/Scale capped at £15,000/)).toBeInTheDocument();
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-domain', '[0,15000]');
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-clips', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Show full range' }));
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-domain', '[0,"auto"]');
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-clips', 'false');
+    expect(screen.getByTestId('projection-chart').textContent).toBe(values);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Focus on base' }));
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-domain', '[0,15000]');
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledOnce());
+    expect(mocks.save.mock.calls[0][0]).toEqual(plan);
+  });
+
+  it('shows an uncapped chart when all cases are zero', async () => {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.income = []; plan.spending = []; plan.oneOffs = [];
+    for (const person of plan.people) for (const asset of Object.values(person.assets)) {
+      asset.balance = 0; asset.annualContribution = 0;
+    }
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    expect(screen.queryByRole('button', { name: 'Show full range' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('chart-axis')).toHaveAttribute('data-clips', 'false');
+  });
+
   it('lets stress tests change the outlook without editing or saving plan inputs', async () => {
     mocks.get.mockResolvedValue({ plan: createExampleRetirementPlan(), savedAt: null });
     render(<RetirementPage />);
