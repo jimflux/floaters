@@ -72,6 +72,25 @@ describe('incomeTax', () => {
 });
 
 describe('projectRetirement', () => {
+  it('keeps child savings out of assets, returns and household drawdown in every case', () => {
+    const value = createExampleRetirementPlan(2026);
+    const before = structuredClone(value);
+    value.childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 1200, universityFund: 500 };
+    for (const scenario of ['cautious', 'base', 'optimistic'] as const) {
+      expect(projectRetirement(value, scenario)).toEqual(projectRetirement(before, scenario));
+    }
+  });
+
+  it('validates separately dated child savings while accepting plans without them', () => {
+    const value = plan();
+    const childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 1200, universityFund: 500 };
+    expect(retirementPlanErrors({ ...value, childSavings })).toEqual([]);
+    expect(retirementPlanErrors({ ...value, childSavings: { ...childSavings, balanceDate: '2027-01-01', jisa: 0, universityFund: 0 } })).toEqual([]);
+    for (const invalid of [null, [], {}, { ...childSavings, name: '' }, { ...childSavings, jisa: -1 }, { ...childSavings, jisa: Number.NaN }, { ...childSavings, universityFund: Infinity }, { ...childSavings, balanceDate: '' }, { ...childSavings, balanceDate: '2026-02-30' }]) {
+      expect(retirementPlanErrors({ ...value, childSavings: invalid }).length).toBeGreaterThan(0);
+    }
+  });
+
   it('projects forward from dated balances with only the remaining growth, savings, income and spending', () => {
     const value = plan();
     value.balanceDate = '2026-07-01';

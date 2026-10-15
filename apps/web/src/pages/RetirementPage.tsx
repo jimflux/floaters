@@ -253,6 +253,22 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
           <div className="mt-5 flex flex-wrap items-center gap-3"><Button disabled={!valid || !dirty || saving || importing} onClick={save}>{saving ? 'Saving…' : 'Save balances'}</Button><p className="text-sm text-muted-foreground">Saves these balances and the rest of your plan.</p></div>
         </section>
 
+        <section className={`${CARD} border border-iris/20`} aria-labelledby="child-savings">
+          <h2 id="child-savings" className="break-words font-display text-xl font-bold">{plan.childSavings?.name.trim() ? `${plan.childSavings.name}’s savings` : 'Children’s savings'}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Tracked separately from your retirement forecast and household spending. These balances save with the rest of your plan.</p>
+          {plan.childSavings ? <>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <TextField label="Child’s name" value={plan.childSavings.name} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.name = value; })} />
+              <label className="block text-xs font-semibold text-muted-foreground">Balances as of<input aria-label="Child balances as of" type="date" className={`${INPUT} mt-1`} value={plan.childSavings.balanceDate} onChange={event => edit(draft => { if (draft.childSavings) draft.childSavings.balanceDate = event.target.value; })} /></label>
+            </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-tile bg-iris/10 p-4"><p className="mb-2 font-display text-lg font-bold">JISA</p><NumberField label="Child JISA balance" value={plan.childSavings.jisa} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.jisa = value; })} /></div>
+              <div className="rounded-tile bg-iris/10 p-4"><p className="mb-2 font-display text-lg font-bold">Uni fund</p><NumberField label="Child uni fund balance" value={plan.childSavings.universityFund} onChange={value => edit(draft => { if (draft.childSavings) draft.childSavings.universityFund = value; })} /></div>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-sm font-semibold">Total saved <span className="ml-2 text-xl tabular-nums">{Number.isFinite(plan.childSavings.jisa + plan.childSavings.universityFund) ? money(plan.childSavings.jisa + plan.childSavings.universityFund) : '—'}</span></p><Button disabled={!valid || !dirty || saving || importing} onClick={save}>{saving ? 'Saving…' : 'Save child savings'}</Button></div>
+          </> : <Button className="mt-4" variant="outline" onClick={() => edit(draft => { draft.childSavings = { name: 'Child', balanceDate: today, jisa: 0, universityFund: 0 }; })}>Add child savings</Button>}
+        </section>
+
         <details className={CARD}><summary className="cursor-pointer font-display text-xl font-bold">Projection settings</summary>
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             <NumberField label="Project to age" value={plan.endAge} onChange={value => edit(draft => { draft.endAge = value; })} />

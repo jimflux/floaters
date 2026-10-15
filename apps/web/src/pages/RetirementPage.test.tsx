@@ -143,6 +143,37 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('adds and saves a separately dated child savings section without changing the retirement chart', async () => {
+    await ready();
+    const before = screen.getByTestId('projection-chart').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Add child savings' }));
+    edit('Child’s name', 'Example child');
+    edit('Child balances as of', '2026-10-15');
+    edit('Child JISA balance', '1200');
+    edit('Child uni fund balance', '500');
+    expect(screen.getByRole('heading', { name: 'Example child’s savings' })).toBeInTheDocument();
+    expect(screen.getByText('£1,700')).toBeInTheDocument();
+    expect(screen.getByTestId('projection-chart').textContent).toBe(before);
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save child savings' }));
+    await screen.findByText('Plan saved.');
+    expect(mocks.save.mock.calls[0][0].childSavings).toEqual({ name: 'Example child', balanceDate: '2026-10-15', jisa: 1200, universityFund: 500 });
+  });
+
+  it('loads child savings from the saved plan and blocks blank or negative amounts', async () => {
+    const plan = createExampleRetirementPlan();
+    plan.childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 1200, universityFund: 500 };
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    expect(await screen.findByLabelText('Child JISA balance')).toHaveValue(1200);
+    edit('Child JISA balance', '');
+    expect(screen.getByRole('button', { name: 'Save child savings' })).toBeDisabled();
+    edit('Child JISA balance', '-1');
+    expect(screen.getByRole('alert')).toHaveTextContent(/JISA balance/);
+    edit('Child JISA balance', '0');
+    expect(screen.getByRole('button', { name: 'Save child savings' })).toBeEnabled();
+  });
+
   it('puts the chart first and keeps return assumptions and annual calculations closed', async () => {
     await ready();
     const chart = screen.getByRole('heading', { name: 'Projected assets by age' });

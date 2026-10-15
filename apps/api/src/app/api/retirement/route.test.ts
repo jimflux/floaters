@@ -127,6 +127,7 @@ describe('retirement persistence', () => {
   it('roundtrips pension mappings including retained disabled partner settings', async () => {
     const plan = fixture();
     plan.balanceDate = '2026-10-15';
+    plan.childSavings = { name: 'Example child', balanceDate: '2026-10-14', jisa: 1200, universityFund: 500 };
     plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 0.4, startYear: 2026 }, { accountCode: 'PENSION', person: 1, share: 0.6, startYear: 2027 }];
     const response = await PUT(request(plan));
     expect(response.status).toBe(200);
