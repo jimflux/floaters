@@ -200,22 +200,25 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
         <PensionLinks plan={plan} onChange={links => edit(draft => { draft.pensionLinks = links; })} source={pension.source} loading={pension.loading} error={pension.error} loadedAt={pension.loadedAt} onRefresh={() => void pension.refresh()} />
         {projectionError && <p role="alert" className="rounded-tile bg-destructive/10 p-4">Projection unavailable: {projectionError} For missing history, update your baseline year, ages and opening balances, or link from a later year.</p>}
 
-        {plan.people.map((person, index) => (index === 0 || plan.partnerEnabled) && <section key={index} className={CARD}>
+        {plan.people.map((person, index) => {
+          const pensionLinkedAtBaseline = (plan.pensionLinks ?? []).some(link => link.person === index && link.startYear <= plan.startYear);
+          return (index === 0 || plan.partnerEnabled) && <section key={index} className={CARD}>
           <h2 className="font-display text-xl font-bold">{index === 0 ? 'You' : 'Partner'}</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <TextField label={`${index === 0 ? 'You' : 'Partner'} name`} value={person.name} onChange={value => edit(draft => { draft.people[index].name = value; })} />
             {([['age', 'current age'], ['retirementAge', 'retirement age'], ['pensionAccessAge', 'pension access age'], ['taxFreeAllowance', 'remaining tax-free allowance']] as const).map(([key, label]) => <NumberField key={key} label={`${index === 0 ? 'You' : 'Partner'} ${label}`} value={person[key]} onChange={value => edit(draft => { draft.people[index][key] = value; })} />)}
           </div>
-          {(plan.pensionLinks ?? []).some(link => link.person === index && link.startYear <= plan.startYear) && <p className="mt-4 text-sm text-muted-foreground">Pension contributions use Floaters links from the baseline year. The manual amount is kept for earlier years and restored when you disconnect.</p>}
+          {pensionLinkedAtBaseline && <p className="mt-4 text-sm text-muted-foreground">Pension contributions use Floaters links from the baseline year. The manual amount is kept for earlier years and restored when you disconnect.</p>}
           <p className="mt-5 text-xs text-muted-foreground">Annual contributions are external savings. Return and contribution growth inputs are percentages in today’s pounds.</p>
           <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-sm"><caption className="sr-only">{index === 0 ? 'Your' : 'Partner'} asset inputs</caption>
             <thead><tr className="border-b border-border">{['Asset', 'Balance (£)', 'Annual contribution (£)', 'Contribution growth (%)', 'Cautious return (%)', 'Base return (%)', 'Optimistic return (%)'].map(label => <th key={label} scope="col" className="p-2 text-xs text-muted-foreground">{label}</th>)}</tr></thead>
             <tbody>{RETIREMENT_ASSETS.map(key => <tr key={key} className="border-b border-border last:border-0"><th scope="row" className="p-2 font-semibold">{ASSET_LABEL[key]}</th>
-              {(['balance', 'annualContribution', 'contributionGrowth'] as const).map(field => <td key={field} className="p-2"><NumberField compact disabled={key === 'pension' && field === 'annualContribution' && (plan.pensionLinks ?? []).some(link => link.person === index && link.startYear <= plan.startYear)} label={`${index === 0 ? 'You' : 'Partner'} ${key} ${field === 'annualContribution' ? 'annual contribution' : field === 'contributionGrowth' ? 'contribution growth' : 'balance'}`} value={person.assets[key][field]} percent={field === 'contributionGrowth'} onChange={value => edit(draft => { draft.people[index].assets[key][field] = value; })} /></td>)}
+              {(['balance', 'annualContribution', 'contributionGrowth'] as const).map(field => <td key={field} className="p-2"><NumberField compact disabled={key === 'pension' && field === 'annualContribution' && pensionLinkedAtBaseline} label={`${index === 0 ? 'You' : 'Partner'} ${key} ${field === 'annualContribution' ? 'annual contribution' : field === 'contributionGrowth' ? 'contribution growth' : 'balance'}`} value={person.assets[key][field]} percent={field === 'contributionGrowth'} onChange={value => edit(draft => { draft.people[index].assets[key][field] = value; })} /></td>)}
               {RETIREMENT_CASES.map(scenario => <td key={scenario} className="p-2"><NumberField compact label={`${index === 0 ? 'You' : 'Partner'} ${key} ${scenario} return`} value={person.assets[key].returns[scenario]} percent onChange={value => edit(draft => { draft.people[index].assets[key].returns[scenario] = value; })} /></td>)}
             </tr>)}</tbody>
           </table></div>
-        </section>)}
+        </section>;
+        })}
 
         <section className={CARD}><div className="flex items-center justify-between gap-3"><h2 className="font-display text-xl font-bold">Regular income</h2><Button variant="outline" onClick={() => edit(draft => { draft.income.push({ id: rowId(), label: 'New income', person: 0, startAge: draft.people[0].retirementAge, endAge: 120, annualAmount: 0, taxable: true }); })}>Add income</Button></div>
           <p className="mt-2 text-sm text-muted-foreground">Gross annual amounts; age limits apply to the person receiving the income, including both end ages.</p>
