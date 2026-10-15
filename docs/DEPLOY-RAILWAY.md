@@ -58,6 +58,14 @@ so it needs no redirect URI. `/auth/callback` is the login.flux.am sign-in.
 
 ## 6. Verify
 
+- Before releasing retirement storage, check the live database rather than only
+  the mocked API tests: `select description, updated_at from public.scenarios limit 0;`.
+  If the table is missing, apply the scoped `restore_retirement_scenario_storage`
+  migration. It restores the original table with RLS and backend-only access;
+  existing scenario tables are left unchanged. Do not replay the full initial
+  schema against a shared database.
+- Verify an authenticated `GET /api/retirement` returns 200. A null plan is a
+  valid empty state. A successful build or anonymous 401 does not verify storage.
 - `curl -H "Authorization: Bearer <CONNECT_SECRET>" https://<railway-domain>/api/sync-status`
   should return JSON instantly (no cold-start delay).
 - Load the web app: it should send you to login.flux.am and back. Edit a
