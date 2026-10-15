@@ -58,6 +58,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
   const [importError, setImportError] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [stress, setStress] = useState<RetirementStress>('none');
+  const [fullChartRange, setFullChartRange] = useState(false);
   const effectiveStress = !plan?.partnerEnabled && (stress === 'lose-you' || stress === 'lose-partner') ? 'none' : stress;
   const [detailCase, setDetailCase] = useState<RetirementCase>('base');
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -105,6 +106,9 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
   const chartData = useMemo(() => projections?.base.years.flatMap((row, index, years) =>
     row.year >= currentYear || years[years.length - 1].year < currentYear ? [{ age: row.age,
       cautious: projections.cautious.years[index].totalAssets, base: row.totalAssets, optimistic: projections.optimistic.years[index].totalAssets }] : []), [projections, currentYear]);
+  const chartCeiling = Math.max(1000, ...((chartData ?? []).map(row => row.base * 1.5)));
+  const chartExceedsFocus = chartData?.some(row => RETIREMENT_CASES.some(scenario => row[scenario] > chartCeiling));
+  const chartFocused = !!chartExceedsFocus && !fullChartRange;
   const inputErrors = errors.filter(message => !message.startsWith('Pension'));
   const dirty = !!plan && fingerprint !== savedFingerprint;
   const ready = !!plan && !loading && !loadError;
@@ -219,8 +223,12 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Year-end assets at retirement · age {plan.people[0].retirementAge}</p><p className="mt-2 text-lg font-bold">{detail.assetsAtRetirement === null ? 'Outside projection range' : money(detail.assetsAtRetirement)}</p></div>
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Accessible assets in {selected.year} · age {selected.age}</p><p className="mt-2 text-lg font-bold">{money(selected.accessibleAssets)}</p><p className="text-xs text-muted-foreground">Excludes pensions before each person’s access age.</p></div>
           </div>
-          <div className="mt-3 h-[260px] w-full min-w-0 sm:h-[300px]" role="img" aria-label="Cautious, base and optimistic projected household assets by your age">
-            <ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 10, right: 10, left: 5, bottom: 10 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="age" tickLine={false} /><YAxis width={72} tickFormatter={value => `£${Math.round(Number(value) / 1000)}k`} tickLine={false} /><Tooltip formatter={(value: unknown) => money(Number(value))} labelFormatter={value => `Age ${value}`} /><Legend formatter={value => <span className="text-foreground">{value}</span>} />{RETIREMENT_CASES.map(scenario => <Line key={scenario} type="monotone" dataKey={scenario} name={CASE_LABEL[scenario]} stroke={CASE_COLOR[scenario]} strokeWidth={2} strokeDasharray={scenario === 'cautious' ? '5 4' : scenario === 'optimistic' ? '2 4' : undefined} dot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
+          {chartExceedsFocus && <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p id="chart-scale-note" className="text-xs text-muted-foreground">{chartFocused ? `Scale capped at ${money(chartCeiling)} to keep the base forecast readable. Lines continue above the chart; hover or use Annual breakdown for full values.` : 'Full range shown, including the optimistic forecast’s highest values.'}</p>
+            <Button variant="outline" className="h-8 px-3" aria-pressed={fullChartRange} onClick={() => setFullChartRange(value => !value)}>{fullChartRange ? 'Focus on base' : 'Show full range'}</Button>
+          </div>}
+          <div className="mt-3 h-[260px] w-full min-w-0 sm:h-[300px]" role="img" aria-label="Cautious, base and optimistic projected household assets by your age" aria-describedby={chartExceedsFocus ? 'chart-scale-note' : undefined}>
+            <ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{ top: 10, right: 10, left: 5, bottom: 10 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="age" tickLine={false} /><YAxis width={72} domain={chartFocused ? [0, chartCeiling] : [0, 'auto']} allowDataOverflow={chartFocused} tickFormatter={value => `£${Math.round(Number(value) / 1000)}k`} tickLine={false} /><Tooltip formatter={(value: unknown) => money(Number(value))} labelFormatter={value => `Age ${value}`} /><Legend formatter={value => <span className="text-foreground">{value}</span>} />{RETIREMENT_CASES.map(scenario => <Line key={scenario} type="monotone" dataKey={scenario} name={CASE_LABEL[scenario]} stroke={CASE_COLOR[scenario]} strokeWidth={2} strokeDasharray={scenario === 'cautious' ? '5 4' : scenario === 'optimistic' ? '2 4' : undefined} dot={false} isAnimationActive={false} />)}</LineChart></ResponsiveContainer>
           </div>
           <details className="mt-3 border-t border-border pt-4"><summary className="cursor-pointer font-semibold">Annual breakdown</summary>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-3"><h3 className="font-display text-lg font-bold">Annual detail · {CASE_LABEL[detailCase]}</h3><label className="text-xs font-semibold text-muted-foreground">Selected year<select aria-label="Selected year" className={`${INPUT} mt-1`} value={selected.year} onChange={event => setSelectedYear(Number(event.target.value))}>{detail.years.map(row => <option key={row.year} value={row.year}>{row.year} · age {row.age}</option>)}</select></label></div>
