@@ -158,6 +158,9 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     const states: PersonYear[] = people.map(({ person, index }) => ({ person, index, age: person.age + offset,
       alive: index !== deceased, taxableIncome: 0, pensionTaxable: 0, year, inflation, priceIndex }));
     let contributions = 0;
+    const contributionsByPerson: RetirementProjection['years'][number]['contributionsByPerson'] = [
+      { pension: 0, isa: 0, investments: 0, cash: 0 }, { pension: 0, isa: 0, investments: 0, cash: 0 },
+    ];
     let income = 0;
     let tax = 0;
     let withdrawals = 0;
@@ -180,6 +183,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
           const contribution = linked ? linked.amount / priceIndex : asset.annualContribution * (1 + asset.contributionGrowth) ** offset * yearFraction;
           asset.balance += contribution;
           contributions += contribution;
+          contributionsByPerson[state.index][key] += contribution;
         }
       }
     }
@@ -272,7 +276,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     }
     const totalAssets = RETIREMENT_ASSETS.reduce((total, key) => total + balances[key], 0);
     const shortfall = oneOffShortfall + (deficit < 1e-7 ? 0 : deficit);
-    projection.years.push({ year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, income, spending, tax, withdrawals, shortfall });
+    projection.years.push({ year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, contributionsByPerson, income, spending, tax, withdrawals, shortfall });
     if (age === draft.people[0].retirementAge) projection.assetsAtRetirement = totalAssets;
     if (shortfall > 0 && !projection.firstShortfall) projection.firstShortfall = { year, age, amount: shortfall };
   }

@@ -88,6 +88,7 @@ export interface RetirementYear {
   investments: number;
   cash: number;
   contributions: number;
+  contributionsByPerson: [Record<RetirementAssetKey, number>, Record<RetirementAssetKey, number>];
   income: number; // gross regular income
   spending: number;
   tax: number;
