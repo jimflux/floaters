@@ -46,6 +46,12 @@ export interface RetirementPensionLink {
   share: number; // decimal allocation, greater than zero and at most one
   startYear: number;
 }
+export interface RetirementChildSavings {
+  name: string;
+  balanceDate: string;
+  jisa: number;
+  universityFund: number;
+}
 export interface RetirementPlan {
   version: 1;
   startYear: number;
@@ -57,6 +63,7 @@ export interface RetirementPlan {
   spending: RetirementSpending[];
   oneOffs: RetirementOneOff[];
   pensionLinks?: RetirementPensionLink[];
+  childSavings?: RetirementChildSavings; // tracked separately; never used for retirement drawdown
 }
 export interface RetirementYear {
   year: number;
@@ -91,14 +98,29 @@ export function retirementPlanErrors(value: unknown): string[] {
     if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) errors.push(`${label} must be ${integer ? 'a whole number ' : ''}between ${min} and ${max}.`);
   };
   const text = (v: unknown, label: string) => { if (typeof v !== 'string' || !v.trim() || v.length > 100) errors.push(`${label} is required (up to 100 characters).`); };
+  const readDate = (v: unknown) => {
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+    const date = new Date(`${v}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === v ? date : null;
+  };
   if (!object(value)) return ['A retirement plan is required.'];
   if (value.version !== 1) errors.push('Unsupported retirement plan version.');
   number(value.startYear, 2000, 2100, 'Starting year', true);
   if (value.balanceDate !== undefined) {
-    const date = typeof value.balanceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.balanceDate)
-      ? new Date(`${value.balanceDate}T00:00:00Z`) : null;
-    if (!date || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value.balanceDate || date.getUTCFullYear() !== value.startYear) {
+    const date = readDate(value.balanceDate);
+    if (!date || date.getUTCFullYear() !== value.startYear) {
       errors.push('Balance date must be a valid date in the starting year.');
+    }
+  }
+  if (value.childSavings !== undefined) {
+    const savings = value.childSavings;
+    if (!object(savings)) errors.push('Child savings must contain a name, balance date, JISA and uni fund.');
+    else {
+      text(savings.name, 'Child’s name');
+      number(savings.jisa, 0, 100000000, 'Child JISA balance');
+      number(savings.universityFund, 0, 100000000, 'Child uni fund balance');
+      const date = readDate(savings.balanceDate);
+      if (!date || date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2100) errors.push('Child balance date must be a valid date between 2000 and 2100.');
     }
   }
   number(value.endAge, 40, 120, 'End age', true);
