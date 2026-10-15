@@ -11,6 +11,7 @@ vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   LineChart: ({ data, children }: { data: unknown[]; children: React.ReactNode }) => <><div data-testid="projection-chart">{JSON.stringify(data)}</div>{children}</>,
   YAxis: ({ domain, allowDataOverflow }: { domain: unknown[]; allowDataOverflow: boolean }) => <div data-testid="chart-axis" data-domain={JSON.stringify(domain)} data-clips={String(allowDataOverflow)} />,
+  ReferenceLine: ({ x }: { x: number }) => <span data-testid="milestone-reference" data-age={x} />,
   Line: () => null, XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Legend: () => null,
 }));
 import RetirementPage from './RetirementPage';
@@ -144,6 +145,31 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('puts grouped events on the chart and opens their details without dirtying the saved plan', async () => {
+    const year = new Date().getFullYear();
+    const plan = createExampleRetirementPlan(year);
+    plan.people[0].age = 40; plan.people[1].age = 35;
+    plan.oneOffs = [{ id: 'gift', label: 'Windfall', person: 0, asset: 'isa', year: year + 5, amount: 20000 }];
+    plan.income = [{ id: 'job', label: 'Part-time role', person: 1, kind: 'employment', startAge: 40, endAge: 50, annualAmount: 10000, taxable: true }];
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    const chart = screen.getByRole('group', { name: /projected household assets/ });
+    expect(within(chart).getAllByTestId('milestone-reference').some(marker => marker.dataset.age === '45')).toBe(true);
+    const milestones = screen.getByRole('region', { name: 'Chart milestones' });
+    fireEvent.click(within(milestones).getByRole('button', { name: `Milestones in ${year + 5}` }));
+    expect(within(milestones).getByText(/planned £20,000 into ISA/)).toBeInTheDocument();
+    expect(within(milestones).getByText(/Part-time role · £10,000\/year/)).toBeInTheDocument();
+    expect(within(milestones).getByText('Windfall', { selector: 'strong' })).toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    edit('One-off 1 year', String(year + 6));
+    expect(within(milestones).getByRole('button', { name: `Milestones in ${year + 6}` })).toBeInTheDocument();
+    fireEvent.click(within(milestones).getByRole('button', { name: `Milestones in ${year + 6}` }));
+    expect(within(milestones).getByText(/your age 46/)).toBeInTheDocument();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it('keeps saving available for edits throughout the plan and reloads the saved values', async () => {
     let stored = createExampleRetirementPlan(new Date().getFullYear());
     stored.oneOffs = [];
