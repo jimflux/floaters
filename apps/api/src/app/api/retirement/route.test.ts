@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[], items: [] as Record<string, unknown>[],
   calls: [] as { table: string; operation: string; filters: Record<string, unknown>; payload?: unknown }[],
   failure: '' as '' | 'error' | 'throw',
+  writeResult: '' as '' | 'missing' | 'mismatch',
 }));
 vi.mock('@/lib/auth', () => ({ resolveConnection: async () => state.authenticated ? { ok: true, connectionId: state.connection } : { ok: false, status: 401 } }));
 vi.mock('@/lib/supabase', () => ({ supabase: { from: (table: string) => {
@@ -26,6 +27,12 @@ vi.mock('@/lib/supabase', () => ({ supabase: { from: (table: string) => {
       const payload = call.payload as Record<string, unknown>;
       const index = rows.findIndex(row => row.id === payload.id);
       if (index < 0) rows.push(payload); else rows[index] = payload;
+      if (state.writeResult === 'missing') return { data: null, error: null };
+      if (state.writeResult === 'mismatch') {
+        const envelope = JSON.parse(payload.description as string);
+        envelope.plan.endAge += 1;
+        return { data: { ...payload, description: JSON.stringify(envelope) }, error: null };
+      }
       return { data: payload, error: null };
     }
     if (call.operation === 'update') filtered.forEach(row => Object.assign(row, call.payload));
@@ -74,10 +81,18 @@ function uuidSpelling(id: string, spelling: typeof uuidSpellings[number]): strin
 
 beforeEach(() => {
   state.connection = 'connection-a'; state.authenticated = true; state.rows = []; state.items = []; state.calls = []; state.failure = '';
+  state.writeResult = '';
   vi.restoreAllMocks();
 });
 
 describe('retirement persistence', () => {
+  it.each(['missing', 'mismatch'] as const)('does not confirm an unverified database write (%s)', async mode => {
+    state.writeResult = mode;
+    const response = await PUT(request(fixture()));
+    expect(response.status).toBe(500);
+    expect(await response.json()).not.toHaveProperty('savedAt');
+  });
+
   it('uses a stable valid reserved UUID unique to each connection', () => {
     expect(retirementScenarioId('connection-a')).toMatch(/^[\da-f]{8}-[\da-f]{4}-5[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/);
     expect(retirementScenarioId('connection-a')).toBe(retirementScenarioId('connection-a'));
@@ -134,6 +149,7 @@ describe('retirement persistence', () => {
     plan.people[0].assets.pension.feesConfirmed = false;
     plan.people[0].assets.pension.feeSchedule = { threshold: 100000, below: 0.006, above: 0.002, fundCost: 0.001, marketSpread: 0.0005 };
     plan.childSavings = { name: 'Example child', balanceDate: '2026-10-14', jisa: 1200, universityFund: 500 };
+    plan.oneOffs = [{ id: 'purchase', label: 'Planned purchase', person: 0, asset: 'isa', year: 2030, amount: -5000 }];
     plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 0.4, startYear: 2026 }, { accountCode: 'PENSION', person: 1, share: 0.6, startYear: 2027 }];
     const response = await PUT(request(plan));
     expect(response.status).toBe(200);

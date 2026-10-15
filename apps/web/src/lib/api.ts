@@ -16,20 +16,26 @@ const headers = { 'X-Floaters-Client': 'web' };
 const jsonHeaders = { 'X-Floaters-Client': 'web', 'Content-Type': 'application/json' };
 
 export function getRetirementPlan(): Promise<RetirementSavedPlan> {
-  return apiFetch('/api/retirement').then(res => {
+  return apiFetch('/api/retirement', { cache: 'no-store' }).then(res => {
     if (!res.ok) throw new Error('Could not load your saved retirement plan.');
     return res.json();
   });
 }
 
-export function saveRetirementPlan(plan: RetirementPlan): Promise<RetirementSavedPlan> {
+export async function saveRetirementPlan(plan: RetirementPlan): Promise<RetirementSavedPlan> {
   // A failed save must not navigate away from an unsaved plan.
-  return apiFetch('/api/retirement', {
+  const response = await apiFetch('/api/retirement', {
     method: 'PUT', headers: jsonHeaders, body: JSON.stringify(plan),
-  }, false).then(res => {
-    if (!res.ok) throw new Error('Could not save your retirement plan. Your draft is still here.');
-    return res.json();
-  });
+  }, false);
+  if (!response.ok) throw new Error('Could not save your retirement plan. Your draft is still here.');
+  // Read through the same endpoint used after a reload before claiming success.
+  const readBack = await apiFetch('/api/retirement', { cache: 'no-store' }, false);
+  if (!readBack.ok) throw new Error('Could not verify your saved retirement plan. Your draft is still here.');
+  const saved: RetirementSavedPlan = await readBack.json();
+  if (!saved.savedAt || JSON.stringify(saved.plan) !== JSON.stringify(plan)) {
+    throw new Error('Saved retirement plan did not match your changes. Your draft is still here.');
+  }
+  return saved;
 }
 
 function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, redirectOnUnauthorised = true): Promise<Response> {
