@@ -9,7 +9,7 @@ vi.mock('@/lib/api', () => ({ getRetirementPlan: mocks.get, saveRetirementPlan: 
 vi.mock('@/lib/retirement-import', () => ({ importRetirementWorkbook: mocks.workbook, importRetirementJson: mocks.json, MAX_RETIREMENT_FILE_BYTES: 5 * 1024 * 1024 }));
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  LineChart: ({ data, children }: { data: unknown[]; children: React.ReactNode }) => <><div data-testid="projection-chart">{JSON.stringify(data)}</div>{children}</>,
+  LineChart: ({ data, children }: { data: Record<string, unknown>[]; children: React.ReactNode }) => <><div data-testid={data?.[0]?.jisa !== undefined ? 'child-chart' : 'projection-chart'}>{JSON.stringify(data)}</div>{children}</>,
   YAxis: ({ domain, allowDataOverflow }: { domain: unknown[]; allowDataOverflow: boolean }) => <div data-testid="chart-axis" data-domain={JSON.stringify(domain)} data-clips={String(allowDataOverflow)} />,
   ReferenceLine: ({ x }: { x: number }) => <span data-testid="milestone-reference" data-age={x} />,
   Line: () => null, XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Legend: () => null,
@@ -145,6 +145,35 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('projects separate child pots to 18 and saves the age, monthly payments and growth inputs', async () => {
+    const plan = createExampleRetirementPlan();
+    plan.childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 1000, universityFund: 500 };
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    const view = render(<RetirementPage />);
+    await screen.findByLabelText('Child JISA balance');
+    const adultChart = screen.getByTestId('projection-chart').textContent;
+    expect(screen.queryByTestId('child-chart')).not.toBeInTheDocument();
+    edit('Child age at balance date', '6');
+    edit('Child monthly uni contribution', '120');
+    edit('Child JISA annual growth', '4');
+    edit('Child uni fund annual growth', '6');
+    const rows = JSON.parse(screen.getByTestId('child-chart').textContent!);
+    expect(rows[0]).toMatchObject({ age: 6, jisa: 1000, universityFund: 500 });
+    expect(rows[rows.length - 1]).toMatchObject({ age: 18, year: 2038, addedContributions: 17280 });
+    expect(screen.getByTestId('projection-chart').textContent).toBe(adultChart);
+    expect(screen.getByLabelText('Child JISA annual growth')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save child savings' }));
+    await screen.findByText('Plan saved.');
+    const saved = mocks.save.mock.calls[0][0];
+    expect(saved.childSavings).toEqual({ name: 'Example child', balanceDate: '2026-10-15', jisa: 1000, universityFund: 500,
+      ageAtBalanceDate: 6, monthlyUniContribution: 120, jisaAnnualReturn: 0.04, universityAnnualReturn: 0.06 });
+    mocks.get.mockResolvedValue({ plan: saved, savedAt: '2026-10-15T12:00:00Z' });
+    view.unmount();
+    render(<RetirementPage />);
+    expect(await screen.findByTestId('child-chart')).toHaveTextContent(JSON.stringify(rows));
+    expect(screen.getByLabelText('Child monthly uni contribution')).toHaveValue(120);
+  });
+
   it('puts grouped events on the chart and opens their details without dirtying the saved plan', async () => {
     const year = new Date().getFullYear();
     const plan = createExampleRetirementPlan(year);

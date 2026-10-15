@@ -33,7 +33,7 @@ const App = () => {
       <Toaster />
       <Sonner />
       <nav aria-label="Floaters views" className="bg-aubergine px-4 pt-3 sm:px-6">
-        <div role="tablist" aria-label="Planning views" className="flex gap-2">
+        <div role="tablist" aria-label="Planning views" className="mx-auto flex max-w-[1440px] gap-2">
           {['cashflow', 'retirement'].map(view => (
             <button key={view} id={`${view}-tab`} role="tab" type="button" aria-selected={tab === view} aria-controls={`${view}-panel`}
               className={`rounded-t-xl px-5 py-2 text-sm font-semibold transition-colors ${tab === view ? 'bg-background text-aubergine' : 'text-cloud hover:bg-cloud/10'}`}

@@ -57,6 +57,10 @@ export interface RetirementChildSavings {
   balanceDate: string;
   jisa: number;
   universityFund: number;
+  ageAtBalanceDate?: number;
+  monthlyUniContribution?: number; // fixed nominal amount, paid at each month end
+  jisaAnnualReturn?: number; // nominal annual growth after fees, before any tax
+  universityAnnualReturn?: number;
 }
 export interface RetirementPlan {
   version: 1;
@@ -129,6 +133,10 @@ export function retirementPlanErrors(value: unknown): string[] {
       text(savings.name, 'Child’s name');
       number(savings.jisa, 0, 100000000, 'Child JISA balance');
       number(savings.universityFund, 0, 100000000, 'Child uni fund balance');
+      if (savings.ageAtBalanceDate !== undefined) number(savings.ageAtBalanceDate, 0, 18, 'Child age at balance date', true);
+      if (savings.monthlyUniContribution !== undefined) number(savings.monthlyUniContribution, 0, 100000, 'Child monthly uni contribution');
+      if (savings.jisaAnnualReturn !== undefined) number(savings.jisaAnnualReturn, -0.5, 0.5, 'Child JISA annual growth');
+      if (savings.universityAnnualReturn !== undefined) number(savings.universityAnnualReturn, -0.5, 0.5, 'Child uni fund annual growth');
       const date = readDate(savings.balanceDate);
       if (!date || date.getUTCFullYear() < 2000 || date.getUTCFullYear() > 2100) errors.push('Child balance date must be a valid date between 2000 and 2100.');
     }
