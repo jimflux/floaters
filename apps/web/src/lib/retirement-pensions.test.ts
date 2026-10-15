@@ -4,6 +4,7 @@ import { pensionContributionForYear, type PensionCashflow } from './retirement-p
 
 function fixture() {
   const plan = createExampleRetirementPlan(2026);
+  plan.inflation = 0;
   plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }];
   return plan;
 }

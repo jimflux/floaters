@@ -21,7 +21,7 @@ export function PensionLinks({ plan, onChange, source, loading, error, loadedAt,
     .sort((a, b) => Number(/pension/i.test(b.accountName)) - Number(/pension/i.test(a.accountName)) || a.accountName.localeCompare(b.accountName));
   const change = (index: number, patch: Partial<RetirementPensionLink>) => onChange(links.map((link, i) => i === index ? { ...link, ...patch } : link));
   const linkErrors = retirementPlanErrors(plan).filter(message => message.startsWith('Pension'));
-  return <section className="rounded-card bg-card p-4 shadow-sm shadow-aubergine/5 sm:p-6" aria-labelledby="pension-links">
+  return <section className="rounded-xl bg-card p-3 shadow-sm shadow-aubergine/5 sm:p-4" aria-labelledby="pension-links">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="pension-links" className="font-display text-xl font-bold">Pension links from Floaters</h2>
       <Button variant="outline" onClick={onRefresh} disabled={loading}>Refresh pension source</Button></div>
     <p className="mt-2 text-sm text-muted-foreground">Choose which company cost account funds whose pension. Links replace manual pension contributions from the chosen year; nothing is assigned automatically. Changes stay in this draft until Save plan.</p>
@@ -29,7 +29,7 @@ export function PensionLinks({ plan, onChange, source, loading, error, loadedAt,
     {loadedAt && <p className="mt-3 text-xs text-muted-foreground">Last loaded: <time dateTime={loadedAt}>{new Date(loadedAt).toLocaleString('en-GB')}</time>{source?.months.length ? ` · Source window: ${source.months[0]} to ${source.months[source.months.length - 1]}` : ''}</p>}
     {error && <div role="alert" className="mt-3 rounded-tile bg-destructive/10 p-3 text-sm"><p>Could not load the pension source. Linked projections are blocked where this source is needed. Your draft is preserved; you can save or export it and refresh to retry.</p>
       {error instanceof SignInRequiredError && <p>Your session expired. <a className="font-semibold underline" href={loginUrl()} target="_blank" rel="noreferrer">Sign in in a new tab</a>, then refresh.</p>}</div>}
-    <div className="mt-4 space-y-3">{links.map((link, index) => {
+    <div className="mt-2 space-y-3">{links.map((link, index) => {
       const missingAccount = !!link.accountCode && !accounts.some(row => row.accountCode === link.accountCode);
       const unavailable = !!source && missingAccount;
       return <div key={index} className="rounded-tile bg-cloud p-3"><div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -59,9 +59,9 @@ export function PensionLinks({ plan, onChange, source, loading, error, loadedAt,
         return <p role="alert" key={person} className="mt-3 text-sm">{failure instanceof Error ? failure.message : 'Could not calculate linked contributions.'} For missing history, update your baseline year, ages and opening balances, or link from a later year.</p>;
       }
     })}
-    <details className="mt-4 space-y-2 text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold">How linked contributions work</summary>
+    <details className="mt-2 space-y-2 text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold">How linked contributions work</summary>
       <p>Uses saved, unexcluded Floaters cashflow. Temporary what-if exclusions do not change this source. Known payments and projected monthly amounts are already combined: paid amounts are not added again.</p>
-      <p>Beyond the last forecast month, the final monthly amount repeats. Your real pension contribution-growth assumption applies in subsequent calendar years. These extensions are estimates.</p>
+      <p>Beyond the last forecast month, the final monthly amount repeats. Inflation plus your real pension contribution-growth assumption applies in subsequent calendar years. Source amounts are nominal; the retirement forecast converts them into balance-date pounds. These extensions are estimates.</p>
       <p>Balances use your chosen balance date. For a mid-month balance, linked contributions resume the following month; on the first day of a month, that month is included. Earlier payments are already covered by your balances. Do not also enter the same payments as one-offs. Linking does not query a pension provider balance or add company cash balances.</p>
       <p>Manual pension amounts are kept for years before links start and are restored when you disconnect. If the baseline predates the first link, the manual amount remains editable for those earlier years.</p>
     </details>

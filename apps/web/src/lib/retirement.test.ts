@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { RETIREMENT_ASSETS, retirementPlanErrors, type RetirementPlan } from '@floaters/types';
 import type { PensionCashflow } from './retirement-pensions';
 import { createExampleRetirementPlan, incomeTax, projectRetirement } from './retirement';
+import { projectionEndAge } from './retirement-assumptions';
 
 function plan(): RetirementPlan {
   const value = createExampleRetirementPlan(2026);
   value.partnerEnabled = false;
+  value.inflation = 0;
+  delete value.longevityAge;
   value.people.forEach(person => {
     person.age = 60;
     person.retirementAge = 60;
@@ -235,7 +238,7 @@ describe('projectRetirement', () => {
     expect(result.firstShortfall).toEqual({ year: 2026, age: 55, amount: 1000 });
   });
 
-  it('draws cash, investments, ISA, then pensions across the household', () => {
+  it('uses cash and investments, then tax-free pension income before ISA across the household', () => {
     const value = plan();
     value.partnerEnabled = true;
     value.people[0].assets.pension.balance = 10000;
@@ -244,7 +247,7 @@ describe('projectRetirement', () => {
     value.people[1].assets.investments.balance = 1000;
     spend(value, 2500);
     const row = projectRetirement(value, 'base').years[0];
-    expect(row).toMatchObject({ cash: 0, investments: 0, isa: 500, pension: 10000, withdrawals: 2500, shortfall: 0, partnerAge: 60 });
+    expect(row).toMatchObject({ cash: 0, investments: 0, isa: 1000, pension: 9500, withdrawals: 2500, shortfall: 0, partnerAge: 60 });
   });
 
   it.each([0, 1] as const)('lets person %s fund pooled household spending from their pension', owner => {
@@ -407,9 +410,9 @@ describe('projectRetirement', () => {
     const before = structuredClone(value);
     for (const scenario of ['base', 'cautious', 'optimistic'] as const) {
       const result = projectRetirement(value, scenario);
-      expect(result.years).toHaveLength(value.endAge - value.people[0].age + 1);
+      expect(result.years).toHaveLength(projectionEndAge(value) - value.people[0].age + 1);
       expect(result.years[0].year).toBe(value.startYear);
-      expect(result.years[result.years.length - 1].age).toBe(value.endAge);
+      expect(result.years[result.years.length - 1].age).toBe(projectionEndAge(value));
       expect(result.years.every(row => RETIREMENT_ASSETS.every(key => row[key] >= 0))).toBe(true);
     }
     expect(value).toEqual(before);

@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, strFromU8, unzipSync, zipSync } from 'fflate';
+import { realReturn } from './retirement-assumptions';
 import { createExampleRetirementPlan } from './retirement';
 import { importRetirementJson, importRetirementWorkbook, MAX_RETIREMENT_FILE_BYTES } from './retirement-import';
 
 function workbook(overrides: Record<string, string | number> = {}, sheetName = 'Input Tap') {
   const input: Record<string, string | number> = { B7: 40, B8: 60, B30: 38, B31: 60, A19: 'Later income', B19: 68, C19: 100, D19: 10000, I19: 'Living costs', J19: 60, K19: 100, L19: 20000, ...overrides };
   for (const base of [12, 35]) for (let i = 0; i < 4; i++) Object.assign(input, { [`B${base + i}`]: 1000, [`C${base + i}`]: 100, [`D${base + i}`]: 0.01, [`E${base + i}`]: 'Balanced', [`F${base + i}`]: 0.025 });
-  const assumptions: Record<string, string | number> = { B9: 2024, A12: 'Balanced', C12: 0.03, D12: 0.05, E12: 0.01, C18: -0.01, B21: 0, B22: 0, B23: 0, B27: 0.005, B28: 0.005, B29: 0.005 };
+  const assumptions: Record<string, string | number> = { B9: 2024, B31: 0.025, B18: 0.015, A12: 'Balanced', C12: 0.03, D12: 0.05, E12: 0.01, C18: -0.01, B21: 0, B22: 0, B23: 0, B27: 0.005, B28: 0.005, B29: 0.005 };
   const sheet = (values: Record<string, string | number>) => `<worksheet><sheetData><row>${Object.entries(values).map(([r, v]) => typeof v === 'number' ? `<c r="${r}"><v>${v}</v></c>` : `<c r="${r}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row></sheetData></worksheet>`;
   return zipSync({
     'xl/workbook.xml': strToU8(`<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" r:id="rId1"/><sheet name="Assumptions" r:id="rId2"/><sheet name="One Off ContributionsWithdrawal" r:id="rId3"/></sheets></workbook>`),
@@ -22,8 +23,8 @@ describe('retirement workbook import', () => {
     const { plan, warnings } = importRetirementWorkbook(workbook(), 2026);
     expect(plan.startYear).toBe(2024);
     expect(plan.people[1].age).toBe(38);
-    expect(plan.people[0].assets.pension.returns).toEqual({ base: 0.025, cautious: 0.005, optimistic: 0.045000000000000005 });
-    expect(plan.people[1].assets.cash.returns).toEqual({ base: -0.01, cautious: -0.01, optimistic: -0.01 });
+    expect(plan.people[0].assets.pension.returns).toEqual({ base: realReturn(0.055, 0.005, 0.025), cautious: realReturn(0.035, 0.005, 0.025), optimistic: realReturn(0.07500000000000001, 0.005, 0.025) });
+    expect(plan.people[1].assets.cash.returns).toEqual({ base: realReturn(0.015, 0, 0.025), cautious: realReturn(0.015, 0, 0.025), optimistic: realReturn(0.015, 0, 0.025) });
     expect(plan.income[0]).toMatchObject({ startAge: 68, endAge: 100, taxable: true, annualAmount: 10000 });
     expect(plan.spending[0].annualAmount).toBe(20000);
     expect(plan.oneOffs).toEqual(expect.arrayContaining([expect.objectContaining({ year: 2028, asset: 'pension', person: 0, amount: 1000 }), expect.objectContaining({ year: 2030, asset: 'cash', person: 1, amount: -500 })]));
