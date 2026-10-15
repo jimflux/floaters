@@ -9,16 +9,9 @@ import {
 } from '@floaters/types';
 import { pensionContributionForYear, type PensionCashflow } from './retirement-pensions';
 
-// England/Wales/NI 2026/27 rates, held constant in today's pounds for all years.
-// https://www.gov.uk/income-tax-rates
-export function incomeTax(income: number): number {
-  const gross = Math.max(0, income);
-  const allowance = Math.max(0, 12570 - Math.max(0, gross - 100000) / 2);
-  const taxable = Math.max(0, gross - allowance);
-  return Math.min(taxable, 37700) * 0.2
-    + Math.min(Math.max(0, taxable - 37700), 125140 - 37700) * 0.4
-    + Math.max(0, taxable - 125140) * 0.45;
-}
+import { assetReturn, DEFAULT_INFLATION, grossTaxBoundary, incomeTax, projectionEndAge, taxBands } from './retirement-assumptions';
+export { incomeTax } from './retirement-assumptions';
+export type RetirementStress = 'none' | 'market-drop' | 'weak-returns' | 'lose-you' | 'lose-partner' | 'later-state-pension';
 
 /** Invented demonstration values; never populated from a personal workbook. */
 export function createExampleRetirementPlan(year = 2026): RetirementPlan {
@@ -32,6 +25,8 @@ export function createExampleRetirementPlan(year = 2026): RetirementPlan {
     version: 1,
     startYear: year,
     endAge: 95,
+    longevityAge: 100,
+    inflation: DEFAULT_INFLATION,
     partnerEnabled: true,
     people: [
       {
@@ -56,49 +51,112 @@ interface PersonYear {
   person: RetirementPerson;
   index: 0 | 1;
   age: number;
+  alive: boolean;
   taxableIncome: number;
   pensionTaxable: number;
+  year: number;
+  inflation: number;
+  priceIndex: number;
+}
+interface PensionPot {
+  state: PersonYear;
+  asset: RetirementAsset;
+  inherited?: boolean;
 }
 
-function pensionQuote(state: PersonYear, gross: number) {
-  const taxFree = Math.min(gross * 0.25, state.person.taxFreeAllowance);
+function pensionQuote(pot: PensionPot, gross: number) {
+  const state = pot.state;
+  const taxFree = pot.inherited ? 0 : Math.min(gross * 0.25, state.person.taxFreeAllowance / state.priceIndex);
   const taxable = gross - taxFree;
   const previousIncome = state.taxableIncome + state.pensionTaxable;
-  const tax = incomeTax(previousIncome + taxable) - incomeTax(previousIncome);
-  return { taxFree, taxable, tax, net: gross - tax };
+  const tax = (incomeTax((previousIncome + taxable) * state.priceIndex, state.year, state.inflation)
+    - incomeTax(previousIncome * state.priceIndex, state.year, state.inflation)) / state.priceIndex;
+  return { taxFree, taxable, tax: Math.max(0, tax), net: gross - Math.max(0, tax) };
 }
 
-function takePension(state: PersonYear, gross: number) {
-  const quote = pensionQuote(state, gross);
-  state.person.assets.pension.balance = Math.max(0, state.person.assets.pension.balance - gross);
-  state.person.taxFreeAllowance = Math.max(0, state.person.taxFreeAllowance - quote.taxFree);
-  state.pensionTaxable += quote.taxable;
+function takePension(pot: PensionPot, gross: number) {
+  const quote = pensionQuote(pot, gross);
+  pot.asset.balance = Math.max(0, pot.asset.balance - gross);
+  if (!pot.inherited) pot.state.person.taxFreeAllowance = Math.max(0, pot.state.person.taxFreeAllowance - quote.taxFree * pot.state.priceIndex);
+  pot.state.pensionTaxable += quote.taxable;
   return quote;
 }
 
+// Split at tax thresholds and exhaustion of tax-free cash. Choose the next
+// available tranche with the lowest marginal tax, using both people's bands.
+function nextTranche(pot: PensionPot): { gross: number; rate: number } {
+  const state = pot.state;
+  const remaining = pot.inherited ? 0 : state.person.taxFreeAllowance / state.priceIndex;
+  const previous = state.taxableIncome + state.pensionTaxable;
+  const bands = taxBands(state.year, state.inflation);
+  const thresholds = [grossTaxBoundary(0, bands), grossTaxBoundary(bands.basic, bands), bands.taper,
+    bands.taper + bands.allowance * 2, grossTaxBoundary(bands.additional, bands)];
+  const breakpoints = [pot.asset.balance, remaining * 4];
+  for (const nominal of thresholds) {
+    const taxable = nominal / state.priceIndex - previous;
+    if (taxable > 0) breakpoints.push(pot.inherited ? taxable : taxable <= remaining * 3 ? taxable / 0.75 : taxable + remaining);
+  }
+  const gross = Math.min(...breakpoints.filter(amount => amount > 1e-7));
+  return { gross, rate: gross > 0 ? pensionQuote(pot, gross).tax / gross : 1 };
+}
+
+function grossForNet(pot: PensionPot, net: number, limit = pot.asset.balance): number {
+  if (pensionQuote(pot, limit).net <= net) return limit;
+  let low = 0;
+  let high = limit;
+  for (let iteration = 0; iteration < 60; iteration++) {
+    const middle = (low + high) / 2;
+    if (pensionQuote(pot, middle).net < net) low = middle;
+    else high = middle;
+  }
+  return high;
+}
+
 /**
- * Annual real-pound projection. Opening balances grow first, then external
- * contributions and dated one-offs apply, then pooled income funds spending.
- * Contributions do not also become household spending. Pension tax is the
- * incremental tax above regular income and earlier withdrawals in that year.
+ * Annual projection in balance-date pounds. Tax uses nominal income and dated
+ * bands; the remaining lump-sum allowance is carried in nominal pounds.
+ * Opening assets grow, then external savings, one-offs and pooled spending
+ * apply. Contributions are externally funded, not charged as spending again.
+ * Tax uses the UK tax year beginning in the labelled calendar year; first-year
+ * regular income/tax are annualised and apportioned (not a PAYE/YTD calculation).
  */
-export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase, source?: PensionCashflow): RetirementProjection {
+export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase, source?: PensionCashflow, stress: RetirementStress = 'none'): RetirementProjection {
   const errors = retirementPlanErrors(plan);
   if (errors.length) throw new Error(errors.join(' '));
   const draft = structuredClone(plan);
   const people: { person: RetirementPerson; index: 0 | 1 }[] = [{ person: draft.people[0], index: 0 }];
   if (draft.partnerEnabled) people.push({ person: draft.people[1], index: 1 });
   const projection: RetirementProjection = { scenario, years: [], firstShortfall: null, assetsAtRetirement: null };
+  const inflation = draft.inflation ?? DEFAULT_INFLATION;
+  const endAge = projectionEndAge(draft);
+  const inherited = draft.people.map(person => ({ ...structuredClone(person.assets.pension), balance: 0, annualContribution: 0 }));
+  let deceased: number | null = null;
+  const retirementOffset = Math.max(0, draft.people[0].retirementAge - draft.people[0].age);
   const yearStart = Date.UTC(draft.startYear, 0, 1);
   const nextYearStart = Date.UTC(draft.startYear + 1, 0, 1);
   const openingDate = draft.balanceDate ? Date.parse(`${draft.balanceDate}T00:00:00Z`) : yearStart;
   const firstYearFraction = (nextYearStart - openingDate) / (nextYearStart - yearStart);
 
-  for (let offset = 0; offset <= draft.endAge - draft.people[0].age; offset += 1) {
+  for (let offset = 0; offset <= endAge - draft.people[0].age; offset += 1) {
     const yearFraction = offset === 0 ? firstYearFraction : 1;
     const year = draft.startYear + offset;
     const age = draft.people[0].age + offset;
-    const states: PersonYear[] = people.map(({ person, index }) => ({ person, index, age: person.age + offset, taxableIncome: 0, pensionTaxable: 0 }));
+    const priceIndex = (1 + inflation) ** offset;
+    // Survivor illustrations: death at 85, 70% of shared spending, all assets
+    // inherited by the survivor. Death after 75 makes inherited pension taxable.
+    const lostPerson = stress === 'lose-you' ? 0 : stress === 'lose-partner' ? 1 : null;
+    if (draft.partnerEnabled && lostPerson !== null && deceased === null && draft.people[lostPerson].age + offset >= 85) {
+      deceased = lostPerson;
+      const survivor = lostPerson === 0 ? 1 : 0;
+      for (const key of RETIREMENT_ASSETS) {
+        const asset = draft.people[lostPerson].assets[key];
+        if (key === 'pension') inherited[survivor] = { ...structuredClone(asset), annualContribution: 0 };
+        else draft.people[survivor].assets[key].balance += asset.balance;
+        asset.balance = 0;
+      }
+    }
+    const states: PersonYear[] = people.map(({ person, index }) => ({ person, index, age: person.age + offset,
+      alive: index !== deceased, taxableIncome: 0, pensionTaxable: 0, year, inflation, priceIndex }));
     let contributions = 0;
     let income = 0;
     let tax = 0;
@@ -106,12 +164,20 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     let oneOffShortfall = 0;
 
     for (const state of states) {
+      if (!state.alive) continue;
+      const grow = (asset: RetirementAsset, invested: boolean) => {
+        let rate = assetReturn(asset, scenario, inflation, priceIndex);
+        if (invested && stress === 'weak-returns' && offset >= retirementOffset && offset < retirementOffset + 10) rate -= 0.02;
+        if (invested && stress === 'market-drop' && offset === retirementOffset) asset.balance *= 0.7;
+        asset.balance = Math.max(0, asset.balance * (1 + rate) ** yearFraction);
+      };
+      grow(inherited[state.index], true);
       for (const key of RETIREMENT_ASSETS) {
         const asset = state.person.assets[key];
-        asset.balance = Math.max(0, asset.balance * (1 + asset.returns[scenario]) ** yearFraction);
+        grow(asset, key !== 'cash');
         if (state.age < state.person.retirementAge) {
           const linked = key === 'pension' ? pensionContributionForYear(draft, state.index, year, source) : null;
-          const contribution = linked?.amount ?? asset.annualContribution * (1 + asset.contributionGrowth) ** offset * yearFraction;
+          const contribution = linked ? linked.amount / priceIndex : asset.annualContribution * (1 + asset.contributionGrowth) ** offset * yearFraction;
           asset.balance += contribution;
           contributions += contribution;
         }
@@ -120,16 +186,17 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
 
     for (const row of draft.income) {
       const state = states[row.person];
-      if (!state || state.age < row.startAge || state.age > row.endAge) continue;
+      const delayed = stress === 'later-state-pension' && row.kind === 'state-pension' ? 2 : 0;
+      if (!state?.alive || state.age < row.startAge + delayed || state.age > row.endAge) continue;
       income += row.annualAmount * yearFraction;
       // Keep annual income for pension marginal tax; regular tax below is
       // apportioned over the remaining year at the same annual income rate.
       if (row.taxable) state.taxableIncome += row.annualAmount;
     }
-    tax = states.reduce((total, state) => total + incomeTax(state.taxableIncome) * yearFraction, 0);
+    tax = states.reduce((total, state) => total + incomeTax(state.taxableIncome * priceIndex, year, inflation) / priceIndex * yearFraction, 0);
 
     // Apply deposits before withdrawals so paired rows do not depend on row order.
-    const oneOffs = draft.oneOffs.filter(row => row.year === year && states[row.person]);
+    const oneOffs = draft.oneOffs.filter(row => row.year === year && states[row.person]?.alive);
     for (const row of oneOffs) {
       if (row.amount > 0) states[row.person].person.assets[row.asset].balance += row.amount;
     }
@@ -144,52 +211,59 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
       const asset = state.person.assets[row.asset];
       const gross = Math.min(desired, asset.balance);
       oneOffShortfall += desired - gross;
-      if (row.asset === 'pension') tax += takePension(state, gross).tax;
+      if (row.asset === 'pension') tax += takePension({ state, asset }, gross).tax;
       else asset.balance = Math.max(0, asset.balance - gross);
       // These proceeds leave the portfolio. A transfer requires its own deposit.
     }
 
-    const spending = draft.spending.reduce((total, row) => total + (age >= row.startAge && age <= row.endAge ? row.annualAmount * yearFraction : 0), 0);
+    const spending = draft.spending.reduce((total, row) => total + (age >= row.startAge && age <= row.endAge ? row.annualAmount * yearFraction : 0), 0) * (deceased === null ? 1 : 0.7);
     let deficit = spending + tax - income;
     if (deficit < 0) {
-      draft.people[0].assets.cash.balance -= deficit;
+      states.find(state => state.alive)!.person.assets.cash.balance -= deficit;
       deficit = 0;
     }
 
-    // Every person's cash is available before anyone's investments/ISA/pension.
-    for (const key of ['cash', 'investments', 'isa'] as const) {
-      for (const state of states) {
-        const asset = state.person.assets[key];
-        const gross = Math.min(deficit, asset.balance);
-        asset.balance = Math.max(0, asset.balance - gross);
+    const pots: PensionPot[] = states.filter(state => state.alive).flatMap(state => [
+      ...(state.age >= state.person.pensionAccessAge ? [{ state, asset: state.person.assets.pension }] : []),
+      { state, asset: inherited[state.index], inherited: true },
+    ]);
+    const drawPensions = (freeOnly: boolean) => {
+      // Each step consumes a tax-band boundary, a pot or the remaining need.
+      // A generous bound also guards against floating-point boundary loops.
+      for (let step = 0; deficit > 1e-7 && step < 100; step++) {
+        const choices = pots.filter(pot => pot.asset.balance > 1e-7)
+          .map(pot => ({ pot, ...nextTranche(pot) })).filter(choice => !freeOnly || choice.rate < 1e-9)
+          .sort((a, b) => a.rate - b.rate);
+        const choice = choices[0];
+        if (!choice) break;
+        const gross = grossForNet(choice.pot, deficit, choice.gross);
+        const quote = takePension(choice.pot, gross);
         withdrawals += gross;
-        deficit -= gross;
+        tax += quote.tax;
+        deficit = Math.max(0, deficit - quote.net);
       }
-    }
-    for (const state of states) {
-      if (deficit <= 0 || state.age < state.person.pensionAccessAge) continue;
-      const available = state.person.assets.pension.balance;
-      let gross = available;
-      if (pensionQuote(state, available).net > deficit) {
-        let low = 0;
-        let high = available;
-        for (let iteration = 0; iteration < 64; iteration += 1) {
-          const middle = (low + high) / 2;
-          if (pensionQuote(state, middle).net < deficit) low = middle;
-          else high = middle;
-        }
-        gross = high;
+    };
+    const drawAssets = (key: 'cash' | 'investments' | 'isa') => {
+      for (const state of states) {
+        if (!state.alive) continue;
+        const asset = state.person.assets[key];
+        const amount = Math.min(deficit, asset.balance);
+        asset.balance -= amount;
+        withdrawals += amount;
+        deficit -= amount;
       }
-      const quote = takePension(state, gross);
-      withdrawals += gross;
-      tax += quote.tax;
-      // Net already excludes withdrawal tax; it must not be deducted again.
-      deficit = Math.max(0, deficit - quote.net);
-    }
+    };
+    drawAssets('cash');
+    drawAssets('investments');
+    drawPensions(true); // use unused income-tax allowances before spending ISAs
+    drawAssets('isa');
+    drawPensions(false);
 
     const balances = { pension: 0, isa: 0, investments: 0, cash: 0 };
     let accessibleAssets = 0;
     for (const state of states) {
+      balances.pension += inherited[state.index].balance;
+      accessibleAssets += inherited[state.index].balance;
       for (const key of RETIREMENT_ASSETS) {
         const balance = state.person.assets[key].balance;
         balances[key] += balance;

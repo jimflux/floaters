@@ -7,13 +7,17 @@ export interface RetirementAsset {
   annualContribution: number;
   contributionGrowth: number; // decimal, real growth
   returns: Record<RetirementCase, number>; // decimal, real annual returns net of fees
+  grossReturns?: Record<RetirementCase, number>; // nominal, before annual fees and inflation
+  annualFee?: number;
+  feesConfirmed?: boolean;
+  feeSchedule?: { threshold: number; below: number; above: number; fundCost: number; marketSpread: number };
 }
 export interface RetirementPerson {
   name: string;
   age: number;
   retirementAge: number;
   pensionAccessAge: number;
-  taxFreeAllowance: number; // remaining allowance in today's pounds
+  taxFreeAllowance: number; // remaining nominal allowance as of the balance date
   assets: Record<RetirementAssetKey, RetirementAsset>;
 }
 export interface RetirementIncome {
@@ -24,6 +28,8 @@ export interface RetirementIncome {
   endAge: number;
   annualAmount: number;
   taxable: boolean;
+  kind?: 'state-pension' | 'employment' | 'other';
+  confirmed?: boolean;
 }
 export interface RetirementSpending {
   id: string;
@@ -57,6 +63,8 @@ export interface RetirementPlan {
   startYear: number;
   balanceDate?: string; // YYYY-MM-DD; legacy plans use 1 January of startYear
   endAge: number;
+  longevityAge?: number; // minimum projection age for the youngest enabled adult
+  inflation?: number; // annual CPI assumption, default 2.5%
   partnerEnabled: boolean;
   people: [RetirementPerson, RetirementPerson];
   income: RetirementIncome[];
@@ -105,6 +113,8 @@ export function retirementPlanErrors(value: unknown): string[] {
   };
   if (!object(value)) return ['A retirement plan is required.'];
   if (value.version !== 1) errors.push('Unsupported retirement plan version.');
+  if (value.inflation !== undefined) number(value.inflation, 0, 0.2, 'Inflation');
+  if (value.longevityAge !== undefined) number(value.longevityAge, 40, 110, 'Household planning age', true);
   number(value.startYear, 2000, 2100, 'Starting year', true);
   if (value.balanceDate !== undefined) {
     const date = readDate(value.balanceDate);
@@ -141,6 +151,21 @@ export function retirementPlanErrors(value: unknown): string[] {
       number(a.balance, 0, 100000000, `${p.name} ${key} balance`);
       number(a.annualContribution, 0, 1000000, `${p.name} ${key} contribution`);
       number(a.contributionGrowth, -0.5, 0.5, `${p.name} ${key} contribution growth`);
+      if (a.annualFee !== undefined) number(a.annualFee, 0, 0.1, `${p.name} ${key} annual fee`);
+      if (a.feesConfirmed !== undefined && typeof a.feesConfirmed !== 'boolean') errors.push('Fee confirmation must be true or false.');
+      if (a.feeSchedule !== undefined) {
+        if (!object(a.feeSchedule)) errors.push(`${p.name} ${key} fee schedule is invalid.`);
+        else {
+          number(a.feeSchedule.threshold, 1, 10000000, 'Fee tier threshold');
+          for (const field of ['below', 'above', 'fundCost', 'marketSpread']) number(a.feeSchedule[field], 0, 0.1, `Fee schedule ${field}`);
+        }
+        if (a.grossReturns === undefined) errors.push('Tiered fees require gross return assumptions.');
+      }
+      if (a.grossReturns !== undefined) {
+        if (!object(a.grossReturns)) errors.push(`${p.name} ${key} gross returns are missing.`);
+        else for (const scenario of RETIREMENT_CASES) number(a.grossReturns[scenario], -0.5, 0.5, `${p.name} ${key} ${scenario} gross return`);
+        if (a.annualFee === undefined && a.feeSchedule === undefined) errors.push(`${p.name} ${key} annual fee is required with gross returns.`);
+      }
       if (!object(a.returns)) errors.push(`${p.name} ${key} returns are missing.`);
       else for (const scenario of RETIREMENT_CASES) number(a.returns[scenario], -0.5, 0.5, `${p.name} ${key} ${scenario} return`);
     }
@@ -164,6 +189,9 @@ export function retirementPlanErrors(value: unknown): string[] {
         number(r.annualAmount, 0, 1000000, 'Annual amount');
         if (typeof r.startAge === 'number' && typeof r.endAge === 'number' && r.startAge > r.endAge) errors.push(`${r.label} end age must be after its start age.`);
         if (key === 'income' && typeof r.taxable !== 'boolean') errors.push('Income tax setting is required.');
+        if (key === 'income' && r.kind !== undefined && !['state-pension', 'employment', 'other'].includes(r.kind as string)) errors.push('Income kind is invalid.');
+        if (key === 'income' && r.confirmed !== undefined && typeof r.confirmed !== 'boolean') errors.push('Income confirmation must be true or false.');
+        if (key === 'income' && r.kind === 'state-pension' && r.taxable !== true) errors.push('State Pension income must be taxable.');
       }
     });
   };

@@ -143,6 +143,58 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('lets stress tests change the outlook without editing or saving plan inputs', async () => {
+    mocks.get.mockResolvedValue({ plan: createExampleRetirementPlan(), savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    const before = screen.getByTestId('projection-chart').textContent;
+    fireEvent.change(screen.getByLabelText('Stress test'), { target: { value: 'market-drop' } });
+    expect(screen.getByText(/invested assets fall 30%/)).toBeInTheDocument();
+    expect(screen.getByTestId('projection-chart').textContent).not.toBe(before);
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(mocks.save).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Stress test'), { target: { value: 'none' } });
+    expect(screen.getByTestId('projection-chart').textContent).toBe(before);
+  });
+
+  it('keeps fees hidden, allows confirmation and flags unverified State Pension estimates', async () => {
+    const plan = createExampleRetirementPlan();
+    plan.income[0].kind = 'state-pension'; plan.income[0].confirmed = false;
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    expect(await screen.findByLabelText('You pension annual fees')).not.toBeVisible();
+    expect(screen.getByText(/State Pension amounts are estimates/)).not.toBeVisible();
+    fireEvent.click(screen.getByText('Advanced assumptions'));
+    edit('You pension annual fees', '0.8');
+    fireEvent.click(screen.getByLabelText('You pension fees confirmed'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+    expect(mocks.save.mock.calls[0][0].people[0].assets.pension).toMatchObject({ annualFee: 0.008, feesConfirmed: true });
+    expect(mocks.save.mock.calls[0][0].people[0].assets.pension.grossReturns).toBeDefined();
+  });
+
+  it('shows the combined tiered fee and explicitly replaces it when a flat fee is entered', async () => {
+    const plan = createExampleRetirementPlan();
+    const pension = plan.people[0].assets.pension;
+    pension.grossReturns = { cautious: 0.02, base: 0.05, optimistic: 0.07 };
+    pension.feeSchedule = { threshold: 100000, below: 0.006, above: 0.002, fundCost: 0.001, marketSpread: 0.0005 };
+    pension.feesConfirmed = true;
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    expect(await screen.findByLabelText('You pension annual fees')).toHaveValue(0.616667);
+    fireEvent.click(screen.getByText('Advanced assumptions'));
+    expect(screen.getByText(/Tiered management fee:/)).toBeVisible();
+    edit('You pension base return', '4');
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeEnabled();
+    edit('You pension annual fees', '0.9');
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+    const saved = mocks.save.mock.calls[0][0].people[0].assets.pension;
+    expect(saved.annualFee).toBeCloseTo(0.009, 12);
+    expect(saved.feeSchedule).toBeUndefined();
+    expect(saved.feesConfirmed).toBe(false);
+  });
+
   it('adds and saves a separately dated child savings section without changing the retirement chart', async () => {
     await ready();
     const before = screen.getByTestId('projection-chart').textContent;

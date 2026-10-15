@@ -1,6 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { RETIREMENT_ASSETS, retirementPlanErrors, type RetirementImportResult, type RetirementPlan } from '@floaters/types';
 import { createExampleRetirementPlan } from './retirement';
+import { projectionEndAge, realReturn } from './retirement-assumptions';
 
 export const MAX_RETIREMENT_FILE_BYTES = 5 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
@@ -93,12 +94,14 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
   };
   const startYear = number(assumptions, 'B9');
   const plan = createExampleRetirementPlan(startYear);
+  plan.inflation = number(assumptions, 'B31');
   plan.income = []; plan.spending = []; plan.oneOffs = [];
   plan.people[0].name = 'You'; plan.people[1].name = 'Partner';
   const warnings = [
     'Check ages and balances before saving. Imported amounts stay in the workbook’s baseline year; they are not automatically updated.',
     'Pension access ages and remaining tax-free allowances use editable defaults; check these against your own pensions.',
     'Property, mortgage balances and historical backtests are not imported. Mortgage spending is included when entered in the spending table.',
+    'Investment fees and State Pension entitlement need confirmation. Returns use compounded inflation and fee deductions, so they may differ from the workbook.',
   ];
   if (startYear !== currentYear) warnings.unshift(`This workbook starts in ${startYear}. Update its baseline year, ages and balances together before treating it as a current plan.`);
   for (const personIndex of [0, 1] as const) {
@@ -113,25 +116,34 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
       asset.annualContribution = number(input, `C${row}`, true);
       asset.contributionGrowth = number(input, `D${row}`, true);
       if (key === 'cash') {
-        const rate = number(assumptions, 'C18');
+        const rate = realReturn(number(assumptions, 'B18'), 0, plan.inflation);
         asset.returns = { cautious: rate, base: rate, optimistic: rate };
+        asset.grossReturns = { cautious: number(assumptions, 'B18'), base: number(assumptions, 'B18'), optimistic: number(assumptions, 'B18') };
+        asset.annualFee = 0;
+        asset.feesConfirmed = true;
       } else {
         const risk = input.get(`E${row}`);
         const riskRow = [12, 13, 14, 15, 16].find(r => assumptions.get(`A${r}`) === risk);
         if (!riskRow) throw new Error(`Choose a recognised risk level in workbook cell E${row}.`);
         const adjustment = number(assumptions, `B${21 + index}`);
         const fee = number(assumptions, `B${27 + index}`);
-        asset.returns = {
-          base: number(input, `F${row}`),
-          cautious: number(assumptions, `E${riskRow}`) * (1 + adjustment) - fee,
-          optimistic: number(assumptions, `D${riskRow}`) * (1 + adjustment) - fee,
-        };
+        const gross = { base: number(assumptions, `C${riskRow}`) + plan.inflation,
+          cautious: number(assumptions, `E${riskRow}`) + plan.inflation,
+          optimistic: number(assumptions, `D${riskRow}`) + plan.inflation };
+        asset.returns = Object.fromEntries(Object.entries(gross).map(([scenario, rate]) =>
+          [scenario, realReturn(rate, fee, plan.inflation!) * (1 + adjustment)])) as typeof asset.returns;
+        if (!adjustment) asset.grossReturns = gross;
+        asset.annualFee = fee;
+        asset.feesConfirmed = false;
       }
     }
     for (let row = personIndex === 0 ? 19 : 42; row <= (personIndex === 0 ? 24 : 47); row++) {
       const amount = number(input, `D${row}`, true);
       if (!amount) continue;
-      plan.income.push({ id: `workbook-income-${row}`, label: input.get(`A${row}`) || 'Additional income', person: personIndex, startAge: number(input, `B${row}`), endAge: number(input, `C${row}`), annualAmount: amount, taxable: true });
+      const label = input.get(`A${row}`) || 'Additional income';
+      const statePension = /^state pension$/i.test(label.trim());
+      plan.income.push({ id: `workbook-income-${row}`, label, person: personIndex, startAge: number(input, `B${row}`), endAge: statePension ? 120 : number(input, `C${row}`), annualAmount: amount, taxable: true,
+        ...(statePension ? { kind: 'state-pension' as const, confirmed: false } : {}) });
     }
   }
   for (let row = 19; row <= 24; row++) {
@@ -148,6 +160,12 @@ export function importRetirementWorkbook(buffer: ArrayBuffer, currentYear = new 
     const row = Number(match[2]);
     const person = row < 20 ? 0 : 1;
     plan.oneOffs.push({ id: `workbook-oneoff-${reference}`, label: oneOffs.get(`${match[1]}${person === 0 ? 16 : 36}`) || 'Workbook one-off', year: number(oneOffs, `${match[1]}1`), person, asset: RETIREMENT_ASSETS[row - (person === 0 ? 12 : 32)], amount });
+  }
+  const lastSpendingAge = Math.max(...plan.spending.map(row => row.endAge));
+  const horizon = projectionEndAge(plan);
+  if (lastSpendingAge >= 95 && lastSpendingAge < horizon) {
+    plan.spending.filter(row => row.endAge === lastSpendingAge).forEach(row => { row.endAge = horizon; });
+    warnings.push('The final later-life spending phase is extended through the household planning horizon. Review the amount for one or two people.');
   }
   const errors = retirementPlanErrors(plan);
   if (errors.length) throw new Error(errors.slice(0, 4).join(' '));
