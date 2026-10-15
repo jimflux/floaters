@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExampleRetirementPlan } from '@/lib/retirement';
 import { SignInRequiredError } from '@/lib/session';
@@ -144,6 +144,77 @@ describe('linked pensions', () => {
   });
 });
 describe('RetirementPage', () => {
+  it('keeps saving available for edits throughout the plan and reloads the saved values', async () => {
+    let stored = createExampleRetirementPlan(new Date().getFullYear());
+    stored.oneOffs = [];
+    stored.childSavings = { name: 'Example child', balanceDate: '2026-10-15', jisa: 100, universityFund: 200 };
+    mocks.get.mockImplementation(async () => ({ plan: structuredClone(stored), savedAt: '2026-10-14T12:00:00Z' }));
+    mocks.save.mockImplementation(async plan => {
+      stored = structuredClone(plan);
+      return { plan: structuredClone(stored), savedAt: '2026-10-15T12:00:00Z' };
+    });
+    const view = render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    const bar = screen.getByRole('region', { name: 'Plan saving' });
+    expect(bar).toHaveClass('fixed', 'bottom-0');
+    expect(within(bar).getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    edit('You isa balance', '23456');
+    edit('Child JISA balance', '3456');
+    edit('Spending 1 annual amount', '28000');
+    edit('You pension annual fees', '0.7');
+    fireEvent.click(screen.getByRole('button', { name: 'Add one-off' }));
+    edit('One-off 1 label', 'Planned purchase');
+    edit('One-off 1 amount', '-5000');
+    edit('One-off 1 year', String(new Date().getFullYear() + 2));
+    expect(within(bar).getByText('Changes waiting to be saved')).toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    const before = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(before);
+    expect(before.defaultPrevented).toBe(true);
+    fireEvent.click(within(bar).getByRole('button', { name: 'Save changes' }));
+    await within(bar).findByText('All changes saved to database');
+    const after = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+    view.unmount();
+    render(<RetirementPage />);
+    expect(await screen.findByLabelText('You isa balance')).toHaveValue(23456);
+    expect(screen.getByLabelText('Child JISA balance')).toHaveValue(3456);
+    expect(screen.getByLabelText('Spending 1 annual amount')).toHaveValue(28000);
+    expect(screen.getByLabelText('You pension annual fees')).toHaveValue(0.7);
+    expect(screen.getByLabelText('One-off 1 label')).toHaveValue('Planned purchase');
+    expect(screen.getByLabelText('One-off 1 amount')).toHaveValue(-5000);
+    expect(screen.getByLabelText('One-off 1 year')).toHaveValue(new Date().getFullYear() + 2);
+  });
+
+  it('keeps failed changes available for retry from the persistent save bar', async () => {
+    mocks.save.mockRejectedValueOnce(new Error('Read-back unavailable'));
+    await ready();
+    edit('You isa balance', '23456');
+    const bar = screen.getByRole('region', { name: 'Plan saving' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Save changes' }));
+    await within(bar).findByText('Save failed. Your changes are still here.');
+    expect(screen.getByLabelText('You isa balance')).toHaveValue(23456);
+    expect(within(bar).queryByText('All changes saved to database')).not.toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole('button', { name: 'Retry save' }));
+    await within(bar).findByText('All changes saved to database');
+  });
+
+  it('explains invalid one-offs in the persistent bar and restores saving when corrected', async () => {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.oneOffs = [];
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('You name');
+    fireEvent.click(screen.getByRole('button', { name: 'Add one-off' }));
+    edit('One-off 1 amount', '');
+    const bar = screen.getByRole('region', { name: 'Plan saving' });
+    expect(within(bar).getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(bar).toHaveTextContent(/one-off.*amount/i);
+    edit('One-off 1 amount', '-5000');
+    expect(within(bar).getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
   it('focuses the scale on base while preserving full optimistic values and saved inputs', async () => {
     const plan = createExampleRetirementPlan(new Date().getFullYear());
     plan.partnerEnabled = false;
@@ -444,6 +515,9 @@ describe('RetirementPage', () => {
     expect(screen.getByLabelText('You name')).toHaveValue('Later edit');
     expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
     expect(screen.getByText(/Saved snapshot.*unsaved changes/)).toBeInTheDocument();
+    const bar = screen.getByRole('region', { name: 'Plan saving' });
+    expect(within(bar).getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    expect(bar).toHaveTextContent('Changes waiting to be saved');
   });
   it('requires successful load retry before editing or importing can replace a remote plan', async () => {
     mocks.get.mockRejectedValueOnce(new Error('Unavailable'));

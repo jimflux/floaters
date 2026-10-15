@@ -112,6 +112,16 @@ describe('retirement API requests', () => {
     expect(url).toBe('/api/retirement');
     expect(init).toMatchObject({ method: 'PUT', credentials: 'same-origin', headers: { 'X-Floaters-Client': 'web', 'Content-Type': 'application/json' } });
     expect(JSON.parse(init.body)).toEqual(plan);
+    expect(fetchMock.mock.calls[2]).toEqual(['/api/retirement', expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' })]);
+  });
+  it.each(['mismatch', 'missing', 'error', 'expired'] as const)('does not confirm a save when fresh read-back fails (%s)', async mode => {
+    const plan = createExampleRetirementPlan();
+    fetchMock.mockResolvedValueOnce(ok({ plan, savedAt: '2026-10-14T12:00:00Z' }));
+    if (mode === 'error' || mode === 'expired') fetchMock.mockResolvedValueOnce(new Response(null, { status: mode === 'expired' ? 401 : 500 }));
+    else fetchMock.mockResolvedValueOnce(ok({ plan: mode === 'missing' ? null : { ...plan, endAge: plan.endAge + 1 }, savedAt: '2026-10-14T12:00:00Z' }));
+    await expect(saveRetirementPlan(plan)).rejects.toThrow();
+    expect(assign).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
   it('rejects an expired-session save without navigating away from the unsaved draft', async () => {
     localStorage.setItem(CASHFLOW_CACHE_KEY, '{}');

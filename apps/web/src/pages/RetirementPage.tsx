@@ -118,6 +118,13 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
   const detail = projections?.[detailCase];
   const selected = detail?.years.find(row => row.year === selectedYear) ?? detail?.years[0];
 
+  useEffect(() => {
+    if (!dirty) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [dirty]);
+
   const edit = (change: (draft: RetirementPlan) => void) => {
     setPlan(current => {
       if (!current) return current;
@@ -142,7 +149,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
     setSaving(true); setSaveError(false); setSaveSignInRequired(false); setSaveSuccess(false);
     try {
       const result = await saveRetirementPlan(submitted);
-      setSavedFingerprint(JSON.stringify(submitted));
+      setSavedFingerprint(JSON.stringify(result.plan));
       setSavedAt(result.savedAt);
       setExample(false);
       setSaveSuccess(true);
@@ -178,7 +185,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  return <main className="min-h-screen bg-background text-foreground">
+  return <main className="min-h-screen bg-background pb-28 text-foreground">
     <header className="flex flex-col justify-between gap-3 bg-aubergine px-3 py-3 text-cloud sm:px-4 lg:flex-row lg:items-center">
       <div><h1 className="font-display text-2xl font-extrabold tracking-tight text-cloud">Retirement planner</h1><p className="mt-1 text-sm text-cloud/75">Your retirement outlook · Update your JPM balances whenever you like</p></div>
       <div className="flex flex-wrap gap-2">
@@ -365,5 +372,13 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
         </div></details>
       </fieldset>}
     </div>
+    {ready && active && <section aria-label="Plan saving" className="fixed inset-x-0 bottom-0 z-40 flex flex-wrap items-center justify-between gap-2 border-t border-border bg-card px-3 py-3 shadow-lg sm:px-4">
+      <div className="min-w-0 text-sm">
+        <p role="status" className="font-semibold">{saving ? 'Saving and checking your changes…' : saveError ? 'Save failed. Your changes are still here.' : dirty ? 'Changes waiting to be saved' : saveSuccess ? 'All changes saved to database' : 'Plan loaded from database'}</p>
+        <p className="text-xs text-muted-foreground">{!valid ? errors[0] ?? 'Fix the highlighted inputs to save.' : dirty ? 'Save applies to your whole retirement plan.' : savedAt ? `Last saved ${new Date(savedAt).toLocaleString('en-GB')}` : 'No unsaved changes.'}</p>
+        {saveSignInRequired && <a className="text-xs underline" href={loginUrl()} target="_blank" rel="noreferrer">Sign in to save</a>}
+      </div>
+      <Button disabled={!valid || (!dirty && !saveError) || saving || importing} onClick={save}>{saving ? 'Saving changes…' : saveError ? 'Retry save' : 'Save changes'}</Button>
+    </section>}
   </main>;
 }

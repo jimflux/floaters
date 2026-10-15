@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod/v4';
+import { isDeepStrictEqual } from 'node:util';
 import { retirementPlanErrors, type RetirementPlan, type RetirementSavedPlan } from '@floaters/types';
 import { AuthError, error, handleError, json, requireConnection } from '@/lib/api-helpers';
 import { supabase } from '@/lib/supabase';
@@ -69,16 +70,18 @@ export async function PUT(request: NextRequest) {
     if (!parsed.success) return json({ error: 'Invalid retirement plan', details: parsed.error.issues.map(issue => issue.message) }, 400);
     const plan = parsed.data;
     const savedAt = new Date().toISOString();
-    const { error: dbError } = await supabase.from('scenarios').upsert({
+    const { data, error: dbError } = await supabase.from('scenarios').upsert({
       id: retirementScenarioId(connectionId),
       connection_id: connectionId,
       name: 'Retirement plan',
       description: retirementDescription(plan),
       is_active: false,
       updated_at: savedAt,
-    }, { onConflict: 'id' });
-    if (dbError) return error('Could not save retirement plan', 500);
-    return json<RetirementSavedPlan>({ plan, savedAt });
+    }, { onConflict: 'id' }).select('description, updated_at').single();
+    if (dbError || !data) return error('Could not save retirement plan', 500);
+    const storedPlan = parseRetirementDescription(data.description);
+    if (!isDeepStrictEqual(storedPlan, plan) || !data.updated_at) return error('Could not verify saved retirement plan', 500);
+    return json<RetirementSavedPlan>({ plan: storedPlan, savedAt: data.updated_at });
   } catch (err) {
     if (err instanceof AuthError) return handleError(err);
     if (err instanceof BodyError) return error(err.message, err.status);
