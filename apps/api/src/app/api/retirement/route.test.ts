@@ -124,6 +124,24 @@ describe('retirement persistence', () => {
     state.connection = 'connection-a';
     expect((await (await GET()).json()).plan.endAge).toBe(95);
   });
+  it('roundtrips pension mappings including retained disabled partner settings', async () => {
+    const plan = fixture();
+    plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 0.4, startYear: 2026 }, { accountCode: 'PENSION', person: 1, share: 0.6, startYear: 2027 }];
+    const response = await PUT(request(plan));
+    expect(response.status).toBe(200);
+    expect((await response.json()).plan).toEqual(plan);
+    expect((await (await GET()).json()).plan).toEqual(plan);
+  });
+  it.each([
+    [{ accountCode: 'PENSION', person: 0, share: 0, startYear: 2026 }],
+    [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 1999 }],
+    [{ accountCode: '', person: 0, share: 1, startYear: 2026 }],
+    [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }, { accountCode: 'PENSION', person: 1, share: 0.1, startYear: 2026 }],
+  ].map(pensionLinks => ({ pensionLinks })))('rejects invalid pension mappings before storage (%j)', async ({ pensionLinks }) => {
+    const response = await PUT(request({ ...fixture(), pensionLinks }));
+    expect(response.status).toBe(400);
+    expect(state.calls).toEqual([]);
+  });
   it.each(['{broken', { version: 2 }, { ...fixture(), endAge: 30 }])('rejects malformed or invalid data without writing', async body => {
     const response = await PUT(request(body));
     expect(response.status).toBe(400);

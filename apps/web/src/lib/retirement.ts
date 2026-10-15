@@ -7,6 +7,7 @@ import {
   type RetirementPlan,
   type RetirementProjection,
 } from '@floaters/types';
+import { pensionContributionForYear, type PensionCashflow } from './retirement-pensions';
 
 // England/Wales/NI 2026/27 rates, held constant in today's pounds for all years.
 // https://www.gov.uk/income-tax-rates
@@ -53,6 +54,7 @@ export function createExampleRetirementPlan(year = 2026): RetirementPlan {
 
 interface PersonYear {
   person: RetirementPerson;
+  index: 0 | 1;
   age: number;
   taxableIncome: number;
   pensionTaxable: number;
@@ -80,17 +82,18 @@ function takePension(state: PersonYear, gross: number) {
  * Contributions do not also become household spending. Pension tax is the
  * incremental tax above regular income and earlier withdrawals in that year.
  */
-export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase): RetirementProjection {
+export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase, source?: PensionCashflow): RetirementProjection {
   const errors = retirementPlanErrors(plan);
   if (errors.length) throw new Error(errors.join(' '));
   const draft = structuredClone(plan);
-  const people = draft.partnerEnabled ? draft.people : [draft.people[0]];
+  const people: { person: RetirementPerson; index: 0 | 1 }[] = [{ person: draft.people[0], index: 0 }];
+  if (draft.partnerEnabled) people.push({ person: draft.people[1], index: 1 });
   const projection: RetirementProjection = { scenario, years: [], firstShortfall: null, assetsAtRetirement: null };
 
   for (let offset = 0; offset <= draft.endAge - draft.people[0].age; offset += 1) {
     const year = draft.startYear + offset;
     const age = draft.people[0].age + offset;
-    const states: PersonYear[] = people.map(person => ({ person, age: person.age + offset, taxableIncome: 0, pensionTaxable: 0 }));
+    const states: PersonYear[] = people.map(({ person, index }) => ({ person, index, age: person.age + offset, taxableIncome: 0, pensionTaxable: 0 }));
     let contributions = 0;
     let income = 0;
     let tax = 0;
@@ -102,7 +105,8 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         const asset = state.person.assets[key];
         asset.balance = Math.max(0, asset.balance * (1 + asset.returns[scenario]));
         if (state.age < state.person.retirementAge) {
-          const contribution = asset.annualContribution * (1 + asset.contributionGrowth) ** offset;
+          const linked = key === 'pension' ? pensionContributionForYear(draft, state.index, year, source) : null;
+          const contribution = linked?.amount ?? asset.annualContribution * (1 + asset.contributionGrowth) ** offset;
           asset.balance += contribution;
           contributions += contribution;
         }

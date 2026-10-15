@@ -40,6 +40,12 @@ export interface RetirementOneOff {
   asset: RetirementAssetKey;
   amount: number; // positive deposit / negative withdrawal from the portfolio
 }
+export interface RetirementPensionLink {
+  accountCode: string;
+  person: 0 | 1;
+  share: number; // decimal allocation, greater than zero and at most one
+  startYear: number;
+}
 export interface RetirementPlan {
   version: 1;
   startYear: number;
@@ -49,6 +55,7 @@ export interface RetirementPlan {
   income: RetirementIncome[];
   spending: RetirementSpending[];
   oneOffs: RetirementOneOff[];
+  pensionLinks?: RetirementPensionLink[];
 }
 export interface RetirementYear {
   year: number;
@@ -131,5 +138,31 @@ export function retirementPlanErrors(value: unknown): string[] {
     });
   };
   rows('income'); rows('spending'); rows('oneOffs');
+  if (value.pensionLinks !== undefined) {
+    if (!Array.isArray(value.pensionLinks) || value.pensionLinks.length > 20) errors.push('Pension links must contain up to 20 mappings.');
+    else {
+      const recipients = new Map<string, Set<unknown>>();
+      const allocations = new Map<string, number>();
+      value.pensionLinks.forEach((link, index) => {
+        const label = `Pension link ${index + 1}`;
+        if (!object(link)) { errors.push(`${label} is missing.`); return; }
+        text(link.accountCode, `${label} account code`);
+        if (link.person !== 0 && link.person !== 1) errors.push(`${label} person must be you or your partner.`);
+        number(link.share, 0, 1, `${label} share`);
+        if (link.share === 0) errors.push(`${label} share must be greater than zero.`);
+        number(link.startYear, 2000, 2220, `${label} starting year`, true);
+        if (typeof link.accountCode === 'string') {
+          const people = recipients.get(link.accountCode) ?? new Set<unknown>();
+          if (people.has(link.person)) errors.push(`${label} duplicates an account and person mapping.`);
+          people.add(link.person);
+          recipients.set(link.accountCode, people);
+          if (typeof link.share === 'number' && Number.isFinite(link.share)) allocations.set(link.accountCode, (allocations.get(link.accountCode) ?? 0) + link.share);
+        }
+      });
+      for (const [account, share] of allocations) {
+        if (share > 1 + 1e-9) errors.push(`Pension account ${account} allocations must not exceed 100%.`);
+      }
+    }
+  }
   return errors;
 }
