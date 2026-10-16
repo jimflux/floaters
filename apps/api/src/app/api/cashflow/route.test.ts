@@ -567,7 +567,7 @@ describe("costs: unchanged account model", () => {
     expect(long.fallsBelowZeroMonth).toBe(short.fallsBelowZeroMonth);
   });
 
-  it('matches a bill only to its supplier and honours saved one-offs without changing history', async () => {
+  it('counts bills within the account budget and honours saved one-offs without changing history', async () => {
     state.bankTxns = ['03', '04', '05'].flatMap(month => [
       { xero_id: `a-${month}`, contact_name: 'A', type: 'SPEND', total: 300, date: `2026-${month}-10`, status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 300, Description: 'Subscription' }] },
       { xero_id: `b-${month}`, contact_name: 'B', type: 'SPEND', total: 200, date: `2026-${month}-10`, status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 200, Description: 'Subscription' }] },
@@ -576,8 +576,8 @@ describe("costs: unchanged account model", () => {
     state.costRules = [{ rule: { type: 'one_off', transactionId: 'bank:laptop:0' } }];
     state.invoices = [{ xero_id: 'bill-a', contact_name: 'A', type: 'ACCPAY', status: 'AUTHORISED', total: 320, amount_due: 320, due_date: '2026-07-10', line_items: [{ AccountCode: '400', LineAmount: 320, Description: 'Subscription' }] }];
     const result = await run();
-    expect(result.cashOut[0].monthly).toEqual([3500, 500, 520]);
-    expect(result.cashOut[0].breakdown?.[2]).toMatchObject({ bills: 320, variable: 200 });
+    expect(result.cashOut[0].monthly).toEqual([3500, 500, 500]);
+    expect(result.cashOut[0].breakdown?.[2]).toMatchObject({ bills: 320, variable: 180 });
     expect(result.costForecast?.recentPayments.find(p => p.id === 'bank:laptop:0')?.streamKey).toBe(costStreamKey('400', 'A', 'Subscription'));
     for (let i = 0; i < result.months.length; i++) expect(result.committedClosing[i] - result.committedOpening[i]).toBe(result.committedNet[i]);
   });
@@ -778,8 +778,8 @@ describe("balance walks", () => {
     expect(res.committedNet[0]).toBe(-1000);
     expect(res.committedClosing[0]).toBe(8000);
     expect(res.committedOpening[0]).toBe(9000);
-    // June closes at today + 4000 rolled-forward receivable − 333.33 cost
-    // forecast (3-month average of May's 1000 spend)
+    // June closes at today + the rolled-forward receivable, less the
+    // conservative recent-history allowance while evidence is sparse.
     expect(res.committedClosing[1]).toBeCloseTo(13666.67, 2);
     assertInvariants(res);
   });
@@ -920,4 +920,25 @@ it("excluding an income client retains cash, removes expected income and its pro
   expect(res.income.totals.invoiced[1]).toBe(0);
   expect(res.income.totals.projected[1]).toBe(0);
   expect(res.vatOwedNow).toBe(100); // VAT on an issued invoice remains a real obligation.
+});
+
+it('uses rolling account trends consistently in the grid and runway regardless of visible window', async () => {
+  state.bankAccounts = [{ current_balance: 5000 }];
+  state.bankTxns = ['2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].map((month, i) => ({
+    xero_id: `trend-${i}`, type: 'SPEND', total: (i + 1) * 100, date: `${month}-10`, status: 'AUTHORISED',
+    line_items: [{ AccountCode: '400', LineAmount: (i + 1) * 100, Description: `Unique description ${i}` }],
+  }));
+  const short = await run();
+  const long = await GET({ url: 'http://localhost/api/cashflow?back=6&forward=24' } as Parameters<typeof GET>[0]) as unknown as CashflowResponse;
+  const cost = short.cashOut.find(r => r.accountCode === '400')!;
+  expect(cost.monthly[1]).toBe(980);
+  expect(cost.monthly[2]).toBe(1044);
+  expect(short.costForecast?.suggestions).toEqual([]);
+  expect(short.costForecast?.accountForecasts).toHaveLength(1);
+  expect(short.costForecast?.accountForecasts?.[0]).toMatchObject({ nextMonthAmount: 1044, method: 'Damped recent trend' });
+  const firstGap = long.months.find((month, i) => month >= '2026-06' && long.committedClosing[i] <= 0);
+  expect(firstGap).toBeDefined();
+  expect(short.fallsBelowZeroMonth).toBe(firstGap);
+  expect(long.fallsBelowZeroMonth).toBe(firstGap);
+  assertInvariants(short); assertInvariants(long);
 });
