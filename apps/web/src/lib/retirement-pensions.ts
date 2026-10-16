@@ -1,4 +1,5 @@
 import type { CashflowData, RetirementPlan } from '@floaters/types';
+import { DEFAULT_INFLATION } from './retirement-assumptions';
 
 export type PensionCashflow = Pick<CashflowData, 'months' | 'cashOut'>;
 
@@ -27,9 +28,11 @@ export function pensionContributionForYear(
   const lastMonth = months[lastIndex];
   const lastSourceYear = Number(lastMonth.slice(0, 4));
   // Source amounts are nominal. Beyond its window, extend the last payment
-  // with inflation plus the chosen real contribution growth. The engine then
+  // with the chosen contribution growth and, for real payments, inflation. The engine then
   // converts the resulting nominal total to balance-date pounds exactly once.
-  const futureGrowth = ((1 + plan.people[person].assets.pension.contributionGrowth) * (1 + (plan.inflation ?? 0.025))) ** Math.max(0, year - lastSourceYear);
+  const pension = plan.people[person].assets.pension;
+  const inflationGrowth = pension.contributionBasis === 'nominal' ? 1 : 1 + (plan.inflation ?? DEFAULT_INFLATION);
+  const futureGrowth = ((1 + pension.contributionGrowth) * inflationGrowth) ** Math.max(0, year - lastSourceYear);
   let amount = 0;
   let estimated = false;
   let extended = false;

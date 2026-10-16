@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RETIREMENT_ASSETS, retirementPlanErrors, type RetirementPlan } from '@floaters/types';
 import { createExampleRetirementPlan, projectRetirement } from './retirement';
-import { assetFee, assetReturn, grossTaxBoundary, incomeTax, projectionEndAge, realReturn, retirementInputNotes, taxBands } from './retirement-assumptions';
+import { assetFee, assetReturn, grossTaxBoundary, incomeTax, projectionEndAge, realReturn, retirementInputNotes, taxBands, setRetirementInflation } from './retirement-assumptions';
 
 function fixture(): RetirementPlan {
   const plan = createExampleRetirementPlan(2026);
@@ -20,6 +20,98 @@ function spend(plan: RetirementPlan, amount: number, startAge = 60) {
 }
 
 describe('retirement assumptions', () => {
+  it('agrees with an independent nominal cash ledger across a partial year and later years', () => {
+    const plan = fixture(); plan.balanceDate = '2026-10-15'; plan.inflation = 0.025;
+    plan.endAge = 62; plan.people[0].retirementAge = 63;
+    plan.people[0].assets.cash = { ...plan.people[0].assets.cash, balance: 100000,
+      annualContribution: 1200, contributionBasis: 'nominal', annualFee: 0.005,
+      grossReturns: { cautious: 0.06, base: 0.06, optimistic: 0.06 } };
+    plan.income = [
+      { id: 'fixed', label: 'Fixed income', person: 0, annualAmount: 20000, amountBasis: 'nominal', taxable: true, startAge: 60, endAge: 120 },
+      { id: 'indexed', label: 'Indexed income', person: 0, annualAmount: 10000, taxable: true, startAge: 60, endAge: 120 },
+    ];
+    spend(plan, 25000);
+    plan.oneOffs = [{ id: 'gift', label: 'Gift', person: 0, asset: 'cash', year: 2027, amount: 3000, amountBasis: 'nominal' }];
+    let nominalBalance = 100000;
+    let elapsed = 0;
+    for (const row of projectRetirement(plan, 'base').years) {
+      const fraction = row.year === 2026 ? 78 / 365 : 1;
+      elapsed += fraction;
+      const index = 1.025 ** elapsed;
+      const nominalIncome = 20000 + 10000 * index;
+      const nominalTax = (nominalIncome - 12570) * 0.2;
+      nominalBalance = nominalBalance * (1.06 * 0.995) ** fraction
+        + (1200 + nominalIncome - nominalTax - 25000 * index) * fraction
+        + (row.year === 2027 ? 3000 : 0);
+      expect(row.totalAssets).toBeCloseTo(nominalBalance / index, 6);
+      expect(row.tax).toBeCloseTo(nominalTax * fraction / index, 6);
+    }
+  });
+
+  it('preserves legacy returns at conversion, then applies inflation changes to every pot once', () => {
+    const plan = createExampleRetirementPlan(2026);
+    const original = structuredClone(plan);
+    plan.people[0].assets.pension.annualFee = 0.005;
+    setRetirementInflation(plan, 0.025);
+    for (const [personIndex, person] of plan.people.entries()) for (const key of RETIREMENT_ASSETS) {
+      expect(assetReturn(person.assets[key], 'base', 0.025)).toBeCloseTo(original.people[personIndex].assets[key].returns.base, 12);
+    }
+    const nominal = plan.people.map(person => Object.fromEntries(RETIREMENT_ASSETS.map(key => [key, { ...person.assets[key].grossReturns }])));
+    setRetirementInflation(plan, 0.05);
+    setRetirementInflation(plan, 0.025);
+    plan.people.forEach((person, i) => RETIREMENT_ASSETS.forEach(key => {
+      expect(person.assets[key].grossReturns).toEqual(nominal[i][key]);
+    }));
+    expect(retirementPlanErrors(plan)).toEqual([]);
+  });
+
+  it('values a fixed nominal deposit and opening cash at the same actual year-end price level', () => {
+    const plan = fixture();
+    plan.balanceDate = '2026-07-01'; plan.inflation = 0.1;
+    plan.people[0].assets.cash = { ...plan.people[0].assets.cash, balance: 10000,
+      grossReturns: { cautious: 0, base: 0, optimistic: 0 }, annualFee: 0 };
+    plan.oneOffs = [{ id: 'deposit', label: 'Fixed payment', year: 2026, person: 0,
+      asset: 'cash', amount: 1000, amountBasis: 'nominal' }];
+    expect(projectRetirement(plan, 'base').years[0].cash).toBeCloseTo(11000 / 1.1 ** (184 / 365), 6);
+  });
+
+  it('converts fixed income, tax and manual contributions once at year end', () => {
+    const plan = fixture(); plan.inflation = 0.1; plan.endAge = 61;
+    plan.people[0].retirementAge = 62;
+    plan.people[0].assets.isa.annualContribution = 1200;
+    plan.people[0].assets.isa.contributionBasis = 'nominal';
+    plan.income = [{ id: 'income', label: 'Fixed pension', person: 0, annualAmount: 20000,
+      amountBasis: 'nominal', taxable: true, startAge: 60, endAge: 120 }];
+    plan.spending = [{ id: 'living', label: 'Fixed payment', annualAmount: 15000,
+      startAge: 60, endAge: 120 }];
+    const row = projectRetirement(plan, 'base').years[1];
+    expect(row.income).toBeCloseTo(20000 / 1.1 ** 2, 6);
+    expect(row.tax).toBeCloseTo(incomeTax(20000) / 1.1 ** 2, 6);
+    expect(row.spending).toBe(15000);
+    expect(row.contributions).toBeCloseTo(1200 / 1.1 ** 2, 6);
+  });
+
+  it('keeps linked nominal contributions on the same clock as growth after a mid-year valuation', () => {
+    const plan = fixture(); plan.balanceDate = '2026-10-15'; plan.inflation = 0.025;
+    plan.endAge = 61; plan.people[0].retirementAge = 62;
+    plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 1, startYear: 2026 }];
+    const months = Array.from({ length: 15 }, (_, i) => new Date(Date.UTC(2026, 9 + i, 1)).toISOString().slice(0, 7));
+    const source = { months, cashOut: [{ accountCode: 'PENSION', accountName: 'Pension',
+      monthly: months.map(() => 1000), isProjected: months.map(() => true), hasOverride: months.map(() => false) }] };
+    const rows = projectRetirement(plan, 'base', source).years;
+    expect(rows[0].contributions).toBeCloseTo(2000 / 1.025 ** (78 / 365), 6);
+    expect(rows[1].contributions).toBeCloseTo(12000 / 1.025 ** (1 + 78 / 365), 6);
+  });
+
+  it('rejects unknown inflation bases without rejecting legacy plans', () => {
+    const plan = fixture();
+    expect(retirementPlanErrors(plan)).toEqual([]);
+    plan.people[0].assets.pension.contributionBasis = 'unknown' as never;
+    plan.income = [{ id: 'income', label: 'Income', person: 0, annualAmount: 20000,
+      amountBasis: 'unknown' as never, taxable: true, startAge: 60, endAge: 120 }];
+    expect(retirementPlanErrors(plan).length).toBeGreaterThanOrEqual(2);
+  });
+
   it('weights management tiers by nominal pot value and adds fund costs and spread once', () => {
     const asset = fixture().people[0].assets.pension;
     // Synthetic fee schedule; personal provider figures never live in fixtures.
@@ -62,8 +154,8 @@ describe('retirement assumptions', () => {
     const plan = fixture(); plan.inflation = 0.025; plan.endAge = 61;
     plan.income = [{ id: 'income', label: 'Pension', person: 0, annualAmount: 12570, taxable: true, startAge: 60, endAge: 120 }];
     const rows = projectRetirement(plan, 'base').years;
-    expect(rows[0].tax).toBe(0);
-    expect(rows[1].tax).toBeCloseTo((12570 * 1.025 - 12570) * 0.2 / 1.025, 6);
+    expect(rows[0].tax).toBeCloseTo((12570 * 1.025 - 12570) * 0.2 / 1.025, 6);
+    expect(rows[1].tax).toBeCloseTo((12570 * 1.025 ** 2 - 12570) * 0.2 / 1.025 ** 2, 6);
   });
 
   it('carries the remaining lump-sum allowance in nominal pounds across years', () => {
@@ -72,7 +164,7 @@ describe('retirement assumptions', () => {
     plan.income = [{ id: 'income', label: 'Income', person: 0, annualAmount: 20000, taxable: true, startAge: 60, endAge: 120 }];
     plan.oneOffs = [{ id: 'out', label: 'Out', person: 0, asset: 'pension', year: 2027, amount: -10000 }];
     const row = projectRetirement(plan, 'base').years[1];
-    expect(row.tax).toBeCloseTo(incomeTax(22000) / 1.1 + (10000 - 1000 / 1.1) * 0.2, 6);
+    expect(row.tax).toBeCloseTo(incomeTax(20000 * 1.1 ** 2) / 1.1 ** 2 + (10000 - 1000 / 1.1 ** 2) * 0.2, 6);
     expect(plan.people[0].taxFreeAllowance).toBe(1000);
   });
 
@@ -164,9 +256,9 @@ describe('retirement assumptions', () => {
     const months = Array.from({ length: 24 }, (_, i) => `${2026 + Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, '0')}`);
     const source = { months, cashOut: [{ accountCode: 'PENSION', accountName: 'Pension', monthly: Array(24).fill(100), isProjected: Array(24).fill(true), hasOverride: Array(24).fill(false) }] };
     const rows = projectRetirement(plan, 'base', source).years;
-    expect(rows[0].contributions).toBe(1200);
-    expect(rows[1].contributions).toBeCloseTo(1200 / 1.025, 6);
-    expect(rows[2].contributions).toBeCloseTo(1200 / 1.025, 6);
+    expect(rows[0].contributions).toBeCloseTo(1200 / 1.025, 6);
+    expect(rows[1].contributions).toBeCloseTo(1200 / 1.025 ** 2, 6);
+    expect(rows[2].contributions).toBeCloseTo(1200 / 1.025 ** 2, 6);
   });
 
   it('validates optional inputs without rejecting old saved plans', () => {

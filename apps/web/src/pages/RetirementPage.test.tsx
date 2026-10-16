@@ -35,6 +35,48 @@ function addPensionLink() {
   fireEvent.click(screen.getByRole('button', { name: 'Add pension link' }));
   edit('Pension link 1 account', '700');
 }
+describe('inflation assumptions', () => {
+  it('holds nominal returns fixed when changing inflation on a legacy saved plan', async () => {
+    const plan = createExampleRetirementPlan(new Date().getFullYear());
+    plan.partnerEnabled = false; plan.endAge = plan.people[0].age;
+    delete plan.longevityAge; plan.income = []; plan.spending = [];
+    for (const asset of Object.values(plan.people[0].assets)) {
+      asset.balance = 10000; asset.annualContribution = 0;
+      asset.returns = { cautious: 0, base: 0, optimistic: 0 };
+    }
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    await screen.findByLabelText('Long-term inflation');
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    const before = JSON.parse(screen.getByTestId('projection-chart').textContent!)[0].base;
+    edit('Long-term inflation', '5');
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0].base).toBeCloseTo(before * 1.025 / 1.05, 6);
+    expect(screen.getByLabelText('You pension base return')).toHaveValue(2.5);
+    edit('Long-term inflation', '');
+    expect(screen.getByRole('button', { name: 'Save plan' })).toBeDisabled();
+    edit('Long-term inflation', '2.5');
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0].base).toBeCloseTo(before, 6);
+  });
+
+  it('saves explicit payment bases and shows the return after fees and inflation', async () => {
+    await ready();
+    edit('You pension contribution inflation', 'nominal');
+    edit('Income 1 inflation', 'nominal');
+    fireEvent.click(screen.getByRole('button', { name: 'Add one-off' }));
+    edit('One-off 1 inflation', 'nominal');
+    edit('You pension base return', '6');
+    edit('You pension annual fees', '0.5');
+    expect(screen.getByText('Base after fees and inflation: 2.90%')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save plan' }));
+    await screen.findByText('Plan saved.');
+    const saved = mocks.save.mock.calls[0][0];
+    expect(saved.people[0].assets.pension.contributionBasis).toBe('nominal');
+    expect(saved.people[0].assets.pension.grossReturns.base).toBe(0.06);
+    expect(saved.income[0].amountBasis).toBe('nominal');
+    expect(saved.oneOffs[0].amountBasis).toBe('nominal');
+  });
+});
+
 describe('linked pensions', () => {
   it('uses a linked zero instead of the preserved manual contribution', async () => {
     const plan = createExampleRetirementPlan(new Date().getFullYear());
@@ -247,7 +289,7 @@ describe('RetirementPage', () => {
     render(<RetirementPage />);
     await screen.findByLabelText('You name');
     fireEvent.click(screen.getByText('Annual breakdown'));
-    const table = screen.getByRole('table', { name: 'Annual retirement projection in today’s pounds' });
+    const table = screen.getByRole('table', { name: 'Annual retirement projection in balance-date pounds' });
     const headers = within(table).getAllByRole('columnheader').map(header => header.textContent);
     const cells = within(within(table).getAllByRole('row')[1]).getAllByRole('cell');
     for (const [name, amount] of [['Your pension contributions', '£7,200'], ['Your ISA contributions', '£2,400'], ['Partner pension contributions', '£1,800'], ['Partner ISA contributions', '£600']]) {
@@ -519,7 +561,7 @@ describe('RetirementPage', () => {
     expect(chart.compareDocumentPosition(balances) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText('You pension base return')).not.toBeVisible();
     expect(screen.getByLabelText('You pension contribution growth')).not.toBeVisible();
-    expect(screen.queryByRole('table', { name: 'Annual retirement projection in today’s pounds' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Annual retirement projection in balance-date pounds' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Advanced assumptions'));
     expect(screen.getByLabelText('You pension base return')).toBeVisible();
   });

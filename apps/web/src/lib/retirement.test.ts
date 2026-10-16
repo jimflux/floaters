@@ -200,7 +200,7 @@ describe('projectRetirement', () => {
     const fraction = (Date.UTC(2027, 0, 1) - Date.UTC(2026, 6, 1)) / (365 * 86400000);
     expect(rows[0].contributionsByPerson[0].pension).toBeCloseTo(6000 * fraction, 8);
     expect(rows[0].contributionsByPerson[1].isa).toBeCloseTo(600 * fraction, 8);
-    expect(rows[1].contributionsByPerson[0].isa).toBeCloseTo(2640, 8);
+    expect(rows[1].contributionsByPerson[0].isa).toBeCloseTo(2400 * 1.1 ** fraction, 8);
     expect(rows[1].contributionsByPerson[1]).toEqual({ pension: 0, isa: 0, investments: 0, cash: 0 });
     expect(rows[2].contributions).toBe(0);
     for (const row of rows) expect(row.contributionsByPerson.flatMap(person => Object.values(person)).reduce((sum, amount) => sum + amount, 0)).toBeCloseTo(row.contributions, 8);

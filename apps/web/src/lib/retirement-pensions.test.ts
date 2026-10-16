@@ -15,6 +15,15 @@ function source(firstYear = 2026, lastMonth = 12): PensionCashflow {
 }
 
 describe('pensionContributionForYear', () => {
+  it('does not inflate fixed-cash contributions beyond the source forecast', () => {
+    const plan = fixture(); plan.inflation = 0.1;
+    plan.people[0].assets.pension.contributionBasis = 'nominal';
+    const data = source();
+    expect(pensionContributionForYear(plan, 0, 2028, data)?.amount).toBe(12 * 111);
+    plan.people[0].assets.pension.contributionGrowth = 0.02;
+    expect(pensionContributionForYear(plan, 0, 2028, data)?.amount).toBeCloseTo(12 * 111 * 1.02 ** 2, 6);
+  });
+
   it('keeps manual behaviour without applicable links or before their first calendar year', () => {
     const plan = fixture();
     expect(pensionContributionForYear(plan, 0, 2025)).toBeNull();
