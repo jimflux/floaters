@@ -15,11 +15,14 @@ export interface CostRule {
 export interface CostSettings {
   rules: CostRule[];
   oneOffIds: string[];
+  /** Costs no longer expected; recorded cash and bills still count. */
+  dismissedStreams?: Pick<CostRule, 'accountCode' | 'streamKey' | 'label'>[];
 }
 
 export type CostSettingsChange =
   | { type: 'recurring'; rule: CostRule }
-  | { type: 'one_off'; transactionId: string };
+  | { type: 'one_off'; transactionId: string }
+  | { type: 'dismissed'; stream: Pick<CostRule, 'accountCode' | 'streamKey' | 'label'> };
 
 export interface CostPayment {
   id: string;

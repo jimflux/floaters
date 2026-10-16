@@ -53,6 +53,7 @@ export function createCostForecast(input: {
 }) {
   const { currentMonth, settings, overrides } = input;
   const oneOffs = new Set(settings.oneOffIds);
+  const dismissed = new Set((settings.dismissedStreams ?? []).map(s => JSON.stringify([s.accountCode, s.streamKey])));
   const aliases = new Map<string, string>();
   for (const rule of settings.rules) {
     for (const key of new Set([rule.streamKey, ...(rule.matchStreamKeys ?? [])])) {
@@ -63,9 +64,9 @@ export function createCostForecast(input: {
     }
   }
   const streamIdentity = (p: CostPayment) => aliases.get(JSON.stringify([p.accountCode, p.streamKey])) ?? p.streamKey;
-  const streams = new Map<string, { accountCode: string; label: string; cash: CostPayment[]; bills: CostPayment[]; rule?: CostRule; baseline: number; method: string }>();
+  const streams = new Map<string, { dismissed: boolean; accountCode: string; label: string; cash: CostPayment[]; bills: CostPayment[]; rule?: CostRule; baseline: number; method: string }>();
   const getStream = (key: string, accountCode: string, label: string) => {
-    if (!streams.has(key)) streams.set(key, { accountCode, label, cash: [], bills: [], baseline: 0, method: '' });
+    if (!streams.has(key)) streams.set(key, { dismissed: dismissed.has(JSON.stringify([accountCode, key])), accountCode, label, cash: [], bills: [], baseline: 0, method: '' });
     return streams.get(key)!;
   };
   for (const p of input.cash) getStream(streamIdentity(p), p.accountCode, p.label).cash.push(p);
@@ -86,7 +87,7 @@ export function createCostForecast(input: {
     recentPayments: input.cash.filter(p => p.amount > 0).sort((a, b) => b.date.localeCompare(a.date)),
   };
   for (const [key, stream] of streams) {
-    if (stream.rule) continue;
+    if (stream.rule || stream.dismissed) continue;
     const payments = stream.cash.filter(p => p.amount > 0 && !oneOffs.has(p.id)).sort((a, b) => a.date.localeCompare(b.date));
     if (!payments.length || !stream.label || stream.label === 'Unspecified cost') continue;
     // Combine partial payments in a month before suggesting a repeating amount.
@@ -122,7 +123,7 @@ export function createCostForecast(input: {
         // Refunds reduce cash, but do not imply an extra subscription is due.
         breakdown.recurring += Math.max(0, expected - Math.max(0, regularActual) - Math.max(0, bills));
         methods.add('Reviewed payment schedule');
-      } else {
+      } else if (!stream.dismissed) {
         breakdown.variable += Math.max(0, stream.baseline - Math.max(0, regularActual) - Math.max(0, bills));
         methods.add(stream.method);
       }

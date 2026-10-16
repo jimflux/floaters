@@ -76,3 +76,17 @@ it('does not offer accounts managed by the VAT forecast for additional schedules
   mount({ ...review, managedAccountCodes: ['400'] });
   expect(screen.getByRole('button', { name: 'Additional planned cost' })).toBeDisabled();
 });
+
+it('dismisses a cancelled cost and lets it be restored without removing its payments', async () => {
+  const { accountCode, streamKey, label } = review.suggestions[0];
+  const stream = { accountCode, streamKey, label };
+  const { rerender, view, client } = mount();
+  fireEvent.click(screen.getByRole('button', { name: 'No longer happening: Adobe' }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith({ type: 'dismissed', stream }));
+  await waitFor(() => expect(client.getQueryState(['cashflow'])?.isInvalidated).toBe(true));
+  rerender(view({ ...review, suggestions: [], settings: { ...review.settings, dismissedStreams: [stream] } }));
+  expect(screen.queryByRole('button', { name: 'Review Adobe' })).not.toBeInTheDocument();
+  expect(screen.getByText('2026-09-01')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Restore suggestion for Adobe' }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith({ type: 'dismissed', streamKey }));
+});

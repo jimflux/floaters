@@ -33,7 +33,7 @@ export async function PUT(request: NextRequest) {
   const parsed = costChangeSchema.safeParse(body);
   if (!parsed.success) return error('Invalid cost forecast decision', 400);
   const change = parsed.data;
-  const ruleKey = change.type === 'recurring' ? `recurring:${change.rule.streamKey}` : `one_off:${change.transactionId}`;
+  const ruleKey = change.type === 'recurring' ? `recurring:${change.rule.streamKey}` : change.type === 'dismissed' ? `dismissed:${change.stream.streamKey}` : `one_off:${change.transactionId}`;
   try {
     const { data: saved, error: dbError } = await supabase.rpc('save_cost_forecast_rule', {
       p_connection_id: connectionId, p_rule_key: ruleKey, p_rule: change,
@@ -50,7 +50,7 @@ export async function DELETE(request: NextRequest) {
   const parsed = costDeleteSchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
   if (!parsed.success) return error('Invalid cost forecast decision', 400);
   const change = parsed.data;
-  const ruleKey = change.type === 'recurring' ? `recurring:${change.streamKey}` : `one_off:${change.transactionId}`;
+  const ruleKey = change.type === 'one_off' ? `one_off:${change.transactionId}` : `${change.type}:${change.streamKey}`;
   try {
     const { error: dbError } = await supabase.from('cost_forecast_rules').delete().eq('connection_id', connectionId).eq('rule_key', ruleKey);
     if (dbError) throw new Error('Delete failed');

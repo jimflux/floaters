@@ -52,15 +52,26 @@ export default function CostForecastPanel({ open, onOpenChange, forecast, accoun
             {draft ? <RuleEditor key={draft.rule.streamKey} draft={draft} forecast={forecast} accounts={costAccounts} pending={pending} onSave={rule => saveChange({ type: 'recurring', rule })} onCancel={() => { setDraft(null); save.reset(); }} /> : <Button variant="outline" disabled={pending || costAccounts.length === 0} onClick={() => edit({ kind: 'additional', rule: { accountCode: costAccounts[0].code, streamKey: `manual:${crypto.randomUUID()}`, label: '', amount: 0, frequencyMonths: 1, startMonth: currentMonth, endMonth: null } })}>Additional planned cost</Button>}
             <section aria-label="Recurring suggestions" className="space-y-2">
               <h3 className="font-semibold text-sm">Suggestions to review</h3>
-              <p className="text-xs text-muted-foreground">Suggestions are not scheduled until you confirm them. Their past payments can still contribute to the variable estimate. When descriptions change, review and match them to the same schedule.</p>
+              <p className="text-xs text-muted-foreground">Suggestions are not scheduled until you confirm them. Their past payments can still contribute to the variable estimate. Choose “No longer happening” to stop estimating a cancelled cost. When descriptions change, review and match them to the same schedule.</p>
               {forecast.suggestions.length === 0 && <p className="text-sm text-muted-foreground">No recurring suggestions yet.</p>}
               {forecast.suggestions.map(rule => <div key={rule.streamKey} className="rounded-lg bg-card border p-3 space-y-2">
                 <p className="text-sm font-semibold break-words">{rule.label}</p>
                 <p className="text-xs">{money(rule.amount)} · {frequency(rule)} · {rule.evidenceCount} payments</p>
                 <p className="text-xs text-muted-foreground">{rule.reason}</p>
-                <Button size="sm" variant="outline" disabled={pending} aria-label={`Review ${rule.label}`} onClick={() => edit({ kind: 'suggestion', rule })}>Review</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" disabled={pending} aria-label={`Review ${rule.label}`} onClick={() => edit({ kind: 'suggestion', rule })}>Review</Button>
+                  <Button size="sm" variant="ghost" disabled={pending} aria-label={`No longer happening: ${rule.label}`} onClick={() => { if (draft?.rule.streamKey === rule.streamKey) setDraft(null); saveChange({ type: 'dismissed', stream: { accountCode: rule.accountCode, streamKey: rule.streamKey, label: rule.label } }); }}>No longer happening</Button>
+                </div>
               </div>)}
             </section>
+            {!!forecast.settings.dismissedStreams?.length && <section aria-label="Dismissed suggestions" className="space-y-2">
+              <h3 className="font-semibold text-sm">Dismissed suggestions</h3>
+              <p className="text-xs text-muted-foreground">Excluded from automatic estimates. Actual payments, existing bills, confirmed schedules and manual month totals still count.</p>
+              {forecast.settings.dismissedStreams.map(stream => <div key={stream.streamKey} className="rounded-lg border bg-card p-3 space-y-2">
+                <p className="text-sm font-semibold break-words">{stream.label}</p>
+                <Button size="sm" variant="outline" disabled={pending} aria-label={`Restore suggestion for ${stream.label}`} onClick={() => { save.reset(); remove.mutate({ type: 'dismissed', streamKey: stream.streamKey }); }}>Restore suggestion</Button>
+              </div>)}
+            </section>}
             <section aria-label="Scheduled costs" className="space-y-2">
               <h3 className="font-semibold text-sm">Scheduled costs</h3>
               {forecast.settings.rules.length === 0 && <p className="text-sm text-muted-foreground">No confirmed schedules.</p>}
