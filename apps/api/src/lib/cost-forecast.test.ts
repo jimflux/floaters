@@ -112,3 +112,21 @@ it('keeps suggested labels within the saved rule limit without changing stream i
   const p = { ...history[2], label: 'Very long description '.repeat(30) };
   expect(model([p]).review.suggestions[0]).toMatchObject({ label: p.label.slice(0, 200), streamKey: p.streamKey });
 });
+
+it('stops estimating a dismissed stream, keeps known cash and bills, and restores its estimate on undo', () => {
+  const { accountCode, streamKey, label } = rule();
+  const cash = [...history, ...history.map(p => payment(`${p.id}-other`, p.date, 200, 'Other')), payment('paid', '2026-06-01', 100)];
+  const build = (dismissed = true, rules: CostRule[] = [], overrides = new Map<string, Map<string, number>>()) => createCostForecast({
+    currentMonth: '2026-06', historyFromMonth: '2025-06', cash,
+    bills: [payment('june-bill', '2026-06-20', 50), payment('july-bill', '2026-07-20', 40)],
+    settings: { rules, oneOffIds: [], dismissedStreams: dismissed ? [{ accountCode, streamKey, label }] : [] }, overrides,
+  });
+  const dismissed = build();
+  expect(dismissed.review.suggestions.map(r => r.label)).toEqual(['Other']);
+  expect(dismissed.estimate('400', '2026-05').amount).toBe(500);
+  expect(dismissed.estimate('400', '2026-06').amount).toBe(350);
+  expect(dismissed.estimate('400', '2026-07')).toMatchObject({ amount: 240, breakdown: { bills: 40, variable: 200 } });
+  expect(build(false).estimate('400', '2026-07').amount).toBe(500);
+  expect(build(true, [rule()]).estimate('400', '2026-07').amount).toBe(500);
+  expect(build(true, [], new Map([['400', new Map([['2026-07', 600]])]])).estimate('400', '2026-07').amount).toBe(600);
+});

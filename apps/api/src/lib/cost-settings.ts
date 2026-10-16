@@ -15,9 +15,10 @@ const ruleSchema = z.object({
 export const costChangeSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('recurring'), rule: ruleSchema }).strict(),
   z.object({ type: z.literal('one_off'), transactionId: key }).strict(),
+  z.object({ type: z.literal('dismissed'), stream: z.object({ accountCode: z.string().min(1).max(100), streamKey: key, label: z.string().trim().min(1).max(200) }).strict() }).strict(),
 ]);
 export const costDeleteSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('recurring'), streamKey: key }).strict(),
+  z.object({ type: z.enum(['recurring', 'dismissed']), streamKey: key }).strict(),
   z.object({ type: z.literal('one_off'), transactionId: key }).strict(),
 ]);
 
@@ -32,7 +33,8 @@ export async function loadCostSettings(connectionId: string): Promise<CostSettin
       const parsed = costChangeSchema.safeParse(row.rule);
       if (!parsed.success) throw new Error('Invalid stored cost forecast settings');
       if (parsed.data.type === 'recurring') settings.rules.push(parsed.data.rule);
-      else settings.oneOffIds.push(parsed.data.transactionId);
+      else if (parsed.data.type === 'one_off') settings.oneOffIds.push(parsed.data.transactionId);
+      else (settings.dismissedStreams ??= []).push(parsed.data.stream);
     }
     if ((data?.length ?? 0) < pageSize) break;
   }

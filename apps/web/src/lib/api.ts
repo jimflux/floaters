@@ -10,7 +10,7 @@ export async function saveCostSetting(change: CostSettingsChange): Promise<void>
   if (!response.ok) throw new Error('Could not save cost forecast settings');
 }
 
-export async function removeCostSetting(change: { type: 'recurring'; streamKey: string } | { type: 'one_off'; transactionId: string }): Promise<void> {
+export async function removeCostSetting(change: { type: 'recurring' | 'dismissed'; streamKey: string } | { type: 'one_off'; transactionId: string }): Promise<void> {
   const response = await apiFetch(`/api/cost-settings?${new URLSearchParams(change)}`, { method: 'DELETE' }, false);
   if (!response.ok) throw new Error('Could not save cost forecast settings');
 }

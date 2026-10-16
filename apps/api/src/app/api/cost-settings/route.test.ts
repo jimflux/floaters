@@ -81,3 +81,28 @@ it('round-trips reviewed matching and rejects a stream claimed by another schedu
   expect(await PUT(request({ type: 'recurring', rule: { ...rule, streamKey: 'manual:other', matchStreamKeys: ['new-description'] } }))).toMatchObject({ status: 409 });
   expect(await PUT(request({ type: 'recurring', rule: { ...matched, amount: 400 } }))).toEqual({ ok: true });
 });
+
+it('persists dismissal across reloads, changes the real forecast and restores it with a scoped delete', async () => {
+  const { loadCostSettings } = await import('@/lib/cost-settings');
+  const { createCostForecast } = await import('@/lib/cost-forecast');
+  const stream = { accountCode: '400', streamKey: 'software', label: 'Software' };
+  state.rows = [{ connection_id: 'connection-b', rule_key: 'dismissed:software', rule: { type: 'dismissed', stream } }];
+  const forecast = async () => createCostForecast({ currentMonth: '2026-10', historyFromMonth: '2026-01',
+    cash: ['07', '08', '09'].map(month => ({ ...stream, id: month, date: `2026-${month}-01`, amount: 30 })),
+    bills: [], settings: await loadCostSettings('connection-a'), overrides: new Map() });
+  expect((await forecast()).estimate('400', '2026-11').amount).toBe(30);
+  expect(await PUT(request({ type: 'dismissed', stream }))).toEqual({ ok: true });
+  expect(await GET()).toEqual({ rules: [], oneOffIds: [], dismissedStreams: [stream] });
+  expect((await forecast()).estimate('400', '2026-11').amount).toBe(0);
+  expect((await forecast()).estimate('400', '2026-09').amount).toBe(30);
+  expect((await forecast()).review.suggestions).toEqual([]);
+  expect(await DELETE(new NextRequest('http://localhost/api/cost-settings?type=dismissed&streamKey=software'))).toEqual({ ok: true });
+  expect((await forecast()).estimate('400', '2026-11').amount).toBe(30);
+  expect(state.rows).toHaveLength(1);
+  expect(state.rows[0].connection_id).toBe('connection-b');
+});
+
+it('rejects incomplete dismissals without saving a decision', async () => {
+  expect(await PUT(request({ type: 'dismissed', stream: { streamKey: 'software' } }))).toMatchObject({ status: 400 });
+  expect(state.rows).toEqual([]);
+});
