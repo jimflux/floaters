@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CashflowData } from "@/lib/types";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }));
+const viewport = vi.hoisted(() => ({ mobile: false }));
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => viewport.mobile }));
 
 function newShape(): CashflowData {
   return {
@@ -52,9 +53,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 import CashflowPage from "./CashflowPage";
 import { CASHFLOW_CACHE_KEY } from "@/lib/api";
+import { SignInRequiredError } from "@/lib/session";
 
 beforeEach(() => {
   localStorage.clear();
+  viewport.mobile = false;
   getCashflow.mockReset().mockResolvedValue(newShape());
 });
 
@@ -181,4 +184,20 @@ describe("zero date and temporary forecast rows", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Choose forecast rows" })).not.toHaveTextContent("excluded"));
     expect(JSON.parse(localStorage.getItem(CASHFLOW_CACHE_KEY)!).income.clients[0].projected).toEqual([0, 0, 45500]);
   });
+});
+
+it.each(['loading', 'signed-out', 'error', 'desktop', 'mobile'])('keeps view navigation available in the %s page header', async state => {
+  if (state === 'loading') getCashflow.mockImplementation(() => new Promise(() => {}));
+  if (state === 'signed-out') getCashflow.mockRejectedValue(new SignInRequiredError());
+  if (state === 'error') getCashflow.mockRejectedValue(new Error('Unavailable'));
+  viewport.mobile = state === 'mobile';
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={qc}><CashflowPage navigation={<nav aria-label="Planning navigation">Retirement</nav>} /></QueryClientProvider>);
+  if (state === 'desktop') await screen.findByText('IKEA');
+  if (state === 'mobile') await screen.findByText('June 2026');
+  if (state === 'signed-out') await screen.findByText('Your session has ended.');
+  if (state === 'error') await screen.findByText('Failed to load data: Unavailable');
+  const navigation = screen.getByRole('navigation', { name: 'Planning navigation' });
+  expect(navigation).toBeVisible();
+  expect(navigation.closest('header')).not.toBeNull();
 });

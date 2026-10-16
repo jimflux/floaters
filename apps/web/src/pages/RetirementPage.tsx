@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   RETIREMENT_ASSETS, RETIREMENT_CASES, retirementPlanErrors,
@@ -18,6 +18,8 @@ import { ChildSavingsProjection } from '@/components/ChildSavingsProjection';
 import { DEFAULT_CHILD_GROWTH } from '@/lib/child-savings';
 import { analyseFire, firePlanAtAge } from '@/lib/retirement-fire';
 import { FirePlanner } from '@/components/FirePlanner';
+import { RetirementFunding } from '@/components/RetirementFunding';
+import { retirementMoney as money, RETIREMENT_ASSET_LABEL as ASSET_LABEL } from '@/lib/retirement-format';
 
 const INPUT = 'w-full min-w-0 rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-iris';
 const CARD = 'min-w-0 rounded-xl bg-card p-3 shadow-sm shadow-aubergine/5 sm:p-4';
@@ -25,9 +27,6 @@ const CASE_LABEL: Record<RetirementCase, string> = { cautious: 'Cautious', base:
 const CASE_COLOR: Record<RetirementCase, string> = { cautious: 'hsl(var(--coral))', base: 'hsl(var(--iris-deep))', optimistic: 'hsl(var(--aubergine))' };
 const STRESS_LABEL: Record<RetirementStress, string> = { none: 'Normal outlook', 'market-drop': 'Market drop at retirement', 'weak-returns': 'Ten difficult investment years', 'later-state-pension': 'State Pension two years later', 'lose-you': 'Partner survives you', 'lose-partner': 'You survive your partner' };
 const STRESS_NOTE: Record<RetirementStress, string> = { none: 'Amounts show purchasing power at your balance date, after inflation and investment fees.', 'market-drop': 'Illustration: invested assets fall 30% at retirement, then follow the selected return case. Cash is unaffected.', 'weak-returns': 'Illustration: invested returns are two percentage points lower for the first ten retirement years. Cash is unaffected.', 'later-state-pension': 'Illustration: each State Pension starts two years later. Amounts and other income stay the same.', 'lose-you': 'Illustration: you die at 85. Your income stops and household spending falls to 70%. Your partner inherits your assets; inherited pension withdrawals are fully taxable. Estate taxes and scheme restrictions are not modelled.', 'lose-partner': 'Illustration: your partner dies at 85. Their income stops and household spending falls to 70%. You inherit their assets; inherited pension withdrawals are fully taxable. Estate taxes and scheme restrictions are not modelled.' };
-const ASSET_LABEL = { pension: 'Pension', isa: 'ISA', investments: 'Investments', cash: 'Cash' };
-const currency = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
-const money = (value: number) => currency.format(value);
 const rowId = () => globalThis.crypto?.randomUUID?.() ?? `row-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 function NumberField({ label, value, onChange, percent = false, compact = false, disabled = false }: { disabled?: boolean; label: string; value: number; onChange: (value: number) => void; percent?: boolean; compact?: boolean }) {
@@ -51,7 +50,7 @@ function InflationField({ label, value, onChange }: { label: string; value?: Ret
   </label>;
 }
 
-export default function RetirementPage({ active = true }: { active?: boolean }) {
+export default function RetirementPage({ active = true, navigation }: { active?: boolean; navigation?: ReactNode }) {
   const now = new Date();
   const currentYear = now.getFullYear();
   const today = `${currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -227,7 +226,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
 
   return <main className="mx-auto min-h-screen w-full max-w-[1440px] bg-background pb-28 text-foreground">
     <header className="flex flex-col justify-between gap-3 bg-aubergine px-3 py-3 text-cloud sm:px-4 lg:flex-row lg:items-center">
-      <div><h1 className="font-display text-2xl font-extrabold tracking-tight text-cloud">Retirement planner</h1><p className="mt-1 text-sm text-cloud/75">Your retirement outlook · Update your JPM balances whenever you like</p></div>
+      <div><div className="flex flex-wrap items-center gap-3"><h1 className="font-display text-2xl font-extrabold tracking-tight text-cloud">Retirement planner</h1>{navigation}</div><p className="mt-1 text-sm text-cloud/75">Your retirement outlook · Update your JPM balances whenever you like</p></div>
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" className="border-cloud/40 bg-transparent text-cloud hover:bg-cloud/10 hover:text-cloud" disabled={!ready || importing || saving} onClick={() => workbookInput.current?.click()}>Import workbook</Button>
         <Button variant="outline" className="border-cloud/40 bg-transparent text-cloud hover:bg-cloud/10 hover:text-cloud" disabled={!ready || importing || saving} onClick={() => jsonInput.current?.click()}>Import JSON</Button>
@@ -276,6 +275,7 @@ export default function RetirementPage({ active = true }: { active?: boolean }) 
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Year-end assets at retirement · age {projectionPlan!.people[0].retirementAge}</p><p className="mt-2 text-lg font-bold">{detail.assetsAtRetirement === null ? 'Outside projection range' : money(detail.assetsAtRetirement)}</p></div>
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Accessible assets in {selected.year} · age {selected.age}</p><p className="mt-2 text-lg font-bold">{money(selected.accessibleAssets)}</p><p className="text-xs text-muted-foreground">Excludes pensions before each person’s access age.</p></div>
           </div>
+          <RetirementFunding plan={projectionPlan!} projection={detail} caseLabel={CASE_LABEL[detailCase]} stress={effectiveStress} selectedYear={selected.year} onYear={setSelectedYear} />
           {chartExceedsFocus && <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p id="chart-scale-note" className="text-xs text-muted-foreground">{chartFocused ? `Scale capped at ${money(chartCeiling)} to keep the base forecast readable. Lines continue above the chart; hover or use Annual breakdown for full values.` : 'Full range shown, including the optimistic forecast’s highest values.'}</p>
             <Button variant="outline" className="h-8 px-3" aria-pressed={fullChartRange} onClick={() => setFullChartRange(value => !value)}>{fullChartRange ? 'Focus on base' : 'Show full range'}</Button>

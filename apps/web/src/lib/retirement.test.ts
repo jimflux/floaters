@@ -272,7 +272,9 @@ describe('projectRetirement', () => {
     value.people[1].assets.investments.balance = 1000;
     spend(value, 2500);
     const row = projectRetirement(value, 'base').years[0];
-    expect(row).toMatchObject({ cash: 0, investments: 0, isa: 1000, pension: 9500, withdrawals: 2500, shortfall: 0, partnerAge: 60 });
+    expect(row).toMatchObject({ cash: 0, investments: 0, isa: 1000, pension: 9500, withdrawals: 2500, shortfall: 0, partnerAge: 60,
+      withdrawalsByAsset: { cash: 1000, investments: 1000, isa: 0, pension: 500 } });
+    expect(Object.values(row.withdrawalsByAsset).reduce((total, amount) => total + amount, 0)).toBe(row.withdrawals);
   });
 
   it.each([0, 1] as const)('lets person %s fund pooled household spending from their pension', owner => {
@@ -291,6 +293,8 @@ describe('projectRetirement', () => {
     spend(value, netIncome + 10000);
     const row = projectRetirement(value, 'base').years[0];
     expect(row.withdrawals).toBeCloseTo(10000 / 0.85, 6);
+    expect(row.withdrawalsByAsset.pension).toBeCloseTo(row.withdrawals, 6);
+    expect(row.withdrawalsByAsset.cash + row.withdrawalsByAsset.investments + row.withdrawalsByAsset.isa).toBe(0);
     expect(row.tax).toBeCloseTo(incomeTax(20000) + row.withdrawals * 0.75 * 0.2, 6);
     expect(row.income + row.withdrawals - row.tax).toBeCloseTo(row.spending, 6);
     expect(row.shortfall).toBe(0);
@@ -442,4 +446,31 @@ describe('projectRetirement', () => {
     }
     expect(value).toEqual(before);
   });
+});
+
+it('shows an unfunded age 56 despite a locked pension, then draws the pension at 57 before later income at 68', () => {
+  const value = plan();
+  value.startYear = 2036;
+  value.people[0].age = 51;
+  value.people[0].retirementAge = 51;
+  value.people[0].pensionAccessAge = 57;
+  value.people[0].assets.isa.balance = 50000;
+  value.people[0].assets.pension.balance = 500000;
+  value.endAge = 68;
+  spend(value, 10000);
+  value.income = [{ id: 'later', label: 'Later income', person: 0, startAge: 68, endAge: 120, annualAmount: 12000, taxable: false }];
+  const result = projectRetirement(value, 'base');
+  const gap = result.years.find(row => row.year === 2041)!;
+  expect(gap).toMatchObject({ age: 56, totalAssets: 500000, accessibleAssets: 0, isa: 0, spendingShortfall: 10000, oneOffShortfall: 0,
+    withdrawalsByAsset: { pension: 0, isa: 0, investments: 0, cash: 0 } });
+  expect(result.years.find(row => row.age === 57)).toMatchObject({ income: 0, spendingShortfall: 0, withdrawalsByAsset: { pension: 10000 } });
+  expect(result.years.find(row => row.age === 68)?.income).toBe(12000);
+});
+it('keeps blocked one-offs separate from the annual living-cost funding gap', () => {
+  const value = plan(); value.people[0].pensionAccessAge = 65;
+  value.people[0].assets.isa.balance = 10000;
+  value.oneOffs = [{ id: 'blocked', label: 'Blocked', person: 0, asset: 'pension', year: value.startYear, amount: -5000 }];
+  spend(value, 10000);
+  const row = projectRetirement(value, 'base').years[0];
+  expect(row).toMatchObject({ yearFraction: 1, spendingShortfall: 0, oneOffShortfall: 5000, shortfall: 5000, withdrawalsByAsset: { isa: 10000 } });
 });

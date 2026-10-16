@@ -170,6 +170,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     let income = 0;
     let tax = 0;
     let withdrawals = 0;
+    const withdrawalsByAsset = { pension: 0, isa: 0, investments: 0, cash: 0 };
     let oneOffShortfall = 0;
 
     for (const state of states) {
@@ -250,6 +251,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         const gross = grossForNet(choice.pot, deficit, choice.gross);
         const quote = takePension(choice.pot, gross);
         withdrawals += gross;
+        withdrawalsByAsset.pension += gross;
         tax += quote.tax;
         deficit = Math.max(0, deficit - quote.net);
       }
@@ -261,6 +263,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         const amount = Math.min(deficit, asset.balance);
         asset.balance -= amount;
         withdrawals += amount;
+        withdrawalsByAsset[key] += amount;
         deficit -= amount;
       }
     };
@@ -282,8 +285,9 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
       }
     }
     const totalAssets = RETIREMENT_ASSETS.reduce((total, key) => total + balances[key], 0);
-    const shortfall = oneOffShortfall + (deficit < 1e-7 ? 0 : deficit);
-    projection.years.push({ year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, contributionsByPerson, income, spending, tax, withdrawals, shortfall });
+    const spendingShortfall = deficit < 1e-7 ? 0 : deficit;
+    const shortfall = oneOffShortfall + spendingShortfall;
+    projection.years.push({ yearFraction, withdrawalsByAsset, spendingShortfall, oneOffShortfall, year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, contributionsByPerson, income, spending, tax, withdrawals, shortfall });
     if (age === draft.people[0].retirementAge) projection.assetsAtRetirement = totalAssets;
     if (shortfall > 0 && !projection.firstShortfall) projection.firstShortfall = { year, age, amount: shortfall };
   }

@@ -47,6 +47,7 @@ function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
 }
 
 interface Props {
+  navigation?: ReactNode;
   data: CashflowData;
   // Raw override amounts keyed accountCode|month (see CashflowPage)
   overrideAmounts?: Map<string, number>;
@@ -55,7 +56,7 @@ interface Props {
   rowControls?: ReactNode;
 }
 
-export default function CashflowMobile({ data, overrideAmounts = new Map(), time, rowControls }: Props) {
+export default function CashflowMobile({ data, overrideAmounts = new Map(), time, rowControls, navigation }: Props) {
   const queryClient = useQueryClient();
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
 
@@ -128,11 +129,11 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 h-16 bg-aubergine text-cloud">
-        <span className="flex items-center gap-2">
+      <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 min-h-16 bg-aubergine text-cloud">
+        <div className="flex flex-wrap items-center gap-3"><span className="flex items-center gap-2">
           <FluxMark className="h-6 w-auto" />
           <span className="font-display font-extrabold text-[24px] leading-none tracking-[-0.05em]">Floaters</span>
-        </span>
+        </span>{navigation}</div>
         <div className="flex items-center gap-1.5">
           <Button variant="outline" size="sm" className={`relative ${HEADER_ICON_BUTTON}`} onClick={() => setPipelineOpen(true)} title="Income pipeline" aria-label="Income pipeline">
             <Inbox className="h-4 w-4" />

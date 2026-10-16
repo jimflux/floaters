@@ -83,6 +83,10 @@ export interface RetirementPlan {
   childSavings?: RetirementChildSavings; // tracked separately; never used for retirement drawdown
 }
 export interface RetirementYear {
+  yearFraction: number; // remaining fraction of the first year; later years are 1
+  withdrawalsByAsset: Record<RetirementAssetKey, number>; // gross withdrawals for spending/tax
+  spendingShortfall: number; // unmet spending and tax after income and accessible withdrawals
+  oneOffShortfall: number; // blocked or insufficient planned one-off withdrawals
   year: number;
   age: number;
   partnerAge: number | null;
