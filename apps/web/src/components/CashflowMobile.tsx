@@ -266,7 +266,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
         )}
 
         {/* Costs */}
-        <div className="px-4 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Review cost forecasts</Button></div>
+        <div className="px-4 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Account forecasts</Button></div>
         <div className="h-3 bg-card" />
         <SectionHeaderMobile
           label="↘ Costs"

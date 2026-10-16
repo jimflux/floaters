@@ -301,7 +301,7 @@ export default function CashflowPage({ navigation }: { navigation?: ReactNode })
                 <tr><td colSpan={months.length + 1} className="h-3 border-0 bg-card" /></tr>
 
                 {/* Costs section */}
-                <tr><td colSpan={months.length + 1} className="px-3 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Review cost forecasts</Button></td></tr>
+                <tr><td colSpan={months.length + 1} className="px-3 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Account forecasts</Button></td></tr>
                 <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={displayCashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
                 {costsOpen && displayCashOut.map((account, idx) => (
                   <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
