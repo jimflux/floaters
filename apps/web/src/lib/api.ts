@@ -3,6 +3,17 @@ import { clearSignInGuard, handleUnauthorised, SignInRequiredError } from './ses
 import { clearCachedData } from './cache';
 import type { PensionCashflow } from './retirement-pensions';
 import type { RetirementPlan, RetirementSavedPlan } from '@floaters/types';
+import type { CostSettingsChange } from '@floaters/types';
+
+export async function saveCostSetting(change: CostSettingsChange): Promise<void> {
+  const response = await apiFetch('/api/cost-settings', { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(change) }, false);
+  if (!response.ok) throw new Error('Could not save cost forecast settings');
+}
+
+export async function removeCostSetting(change: { type: 'recurring'; streamKey: string } | { type: 'one_off'; transactionId: string }): Promise<void> {
+  const response = await apiFetch(`/api/cost-settings?${new URLSearchParams(change)}`, { method: 'DELETE' }, false);
+  if (!response.ok) throw new Error('Could not save cost forecast settings');
+}
 
 export { CASHFLOW_CACHE_KEY, OVERRIDES_CACHE_KEY } from './cache';
 

@@ -7,26 +7,60 @@ export function monthsBetween(from: string, to: string): number {
 }
 
 // Monthly forecast: explicit income, bills, overrides and VAT are sparse
-// events. Between them (and after the last), historical average costs carry
-// on. Solve those gaps directly, so the date has no arbitrary chart horizon.
+// adjustments to a repeating calendar-year baseline. Solve complete cycles
+// directly, including intra-year dips, with no arbitrary forecast horizon.
 export function zeroBalanceMonth(params: {
   currentMonth: string;
   closingBalance: number;
-  baselineNet: number;
+  baselineNet?: number;
+  /** January through December; takes precedence over baselineNet. */
+  baselineNetByCalendarMonth?: number[];
   extraNetByMonth: Map<string, number>;
 }): string | null {
   let month = params.currentMonth;
   let balance = Math.round(params.closingBalance * 100);
-  const baseline = Math.round(params.baselineNet * 100);
   if (balance <= 0) return month;
-  const crossing = () => baseline < 0 ? Math.ceil(balance / -baseline) : Infinity;
-  const events = [...params.extraNetByMonth].filter(([m]) => m > month).sort(([a], [b]) => a.localeCompare(b));
+  const baseline = (params.baselineNetByCalendarMonth ?? Array(12).fill(params.baselineNet ?? 0))
+    .map(value => Math.round(value * 100));
+  if (baseline.length !== 12 || baseline.some(value => !Number.isFinite(value))) {
+    throw new RangeError("Runway baseline must contain twelve finite monthly amounts");
+  }
+
+  // Prefix totals start in the month AFTER the supplied closing balance.
+  // For each of the twelve positions, solve the first cycle in which its
+  // closing balance reaches zero, then choose the earliest crossing.
+  const cycleFrom = (from: string) => {
+    const monthIndex = Number(from.split("-")[1]) % 12;
+    const prefix = [0];
+    for (let i = 0; i < 12; i++) prefix.push(prefix[i] + baseline[(monthIndex + i) % 12]);
+    return prefix;
+  };
+  const crossing = (prefix: number[]) => {
+    const annualNet = prefix[12];
+    let first = Infinity;
+    for (let i = 1; i <= 12; i++) {
+      const firstYearBalance = balance + prefix[i];
+      const cycles = firstYearBalance <= 0 ? 0
+        : annualNet < 0 ? Math.ceil(firstYearBalance / -annualNet) : Infinity;
+      first = Math.min(first, cycles * 12 + i);
+    }
+    return first;
+  };
+
+  const events = [...params.extraNetByMonth]
+    .filter(([m]) => monthsBetween(params.currentMonth, m) > 0)
+    .sort(([a], [b]) => monthsBetween(b, a));
   for (const [next, extra] of events) {
     const gap = monthsBetween(month, next) - 1;
-    if (crossing() <= gap) return addMonthKey(month, crossing());
-    balance += gap * baseline + baseline + Math.round(extra * 100);
+    const prefix = cycleFrom(month);
+    const first = crossing(prefix);
+    if (first <= gap) return addMonthKey(month, first);
+    const months = gap + 1;
+    balance += Math.floor(months / 12) * prefix[12] + prefix[months % 12]
+      + Math.round(extra * 100);
     month = next;
     if (balance <= 0) return month;
   }
-  return baseline < 0 ? addMonthKey(month, crossing()) : null;
+  const first = crossing(cycleFrom(month));
+  return Number.isFinite(first) ? addMonthKey(month, first) : null;
 }

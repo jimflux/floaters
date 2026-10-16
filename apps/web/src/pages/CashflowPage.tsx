@@ -20,6 +20,7 @@ import ForecastViewToggle from '@/components/ForecastViewToggle';
 import ForecastRows, { type ForecastExclusions } from '@/components/ForecastRows';
 import TimeSection from '@/components/TimeSection';
 import TimePanel from '@/components/TimePanel';
+import CostForecastPanel from '@/components/CostForecastPanel';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useForecastView } from '@/hooks/use-forecast-view';
 import { cellTone, zeroChip, zeroDateLabel, RUNWAY_DESCRIPTION } from '@/lib/brand';
@@ -54,6 +55,7 @@ export default function CashflowPage({ navigation }: { navigation?: ReactNode })
   const isMobile = useIsMobile();
   const [incomeOpen, setIncomeOpen] = useState(true);
   const [costsOpen, setCostsOpen] = useState(true);
+  const [costForecastOpen, setCostForecastOpen] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // The pipeline panel (review tray + projections manager) opens from the
@@ -299,6 +301,7 @@ export default function CashflowPage({ navigation }: { navigation?: ReactNode })
                 <tr><td colSpan={months.length + 1} className="h-3 border-0 bg-card" /></tr>
 
                 {/* Costs section */}
+                <tr><td colSpan={months.length + 1} className="px-3 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Review cost forecasts</Button></td></tr>
                 <SectionHeader label="↘ Costs" open={costsOpen} onToggle={() => setCostsOpen(!costsOpen)} months={months} currentMonthIndex={currentMonthIndex} accounts={displayCashOut} allAccounts={accounts} existingCodes={cashOut.map(a => a.accountCode)} section="costs" />
                 {costsOpen && displayCashOut.map((account, idx) => (
                   <AccountRow key={account.accountCode} account={account} months={months} currentMonthIndex={currentMonthIndex} rowIndex={idx} overrideAmounts={overrideAmounts} />
@@ -329,6 +332,7 @@ export default function CashflowPage({ navigation }: { navigation?: ReactNode })
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
+      <CostForecastPanel open={costForecastOpen} onOpenChange={setCostForecastOpen} forecast={data.costForecast} accounts={accounts} currentMonth={currentMonth} />
       <TimePanel open={timeOpen} onOpenChange={setTimeOpen} time={time} />
     </div>
   );
@@ -410,6 +414,7 @@ function AccountRow({ account, months, currentMonthIndex, rowIndex, overrideAmou
           <EditableCell
             key={m}
             value={account.monthly[i]}
+            breakdown={account.breakdown?.[i]}
             accountCode={account.accountCode}
             month={m}
             isProjected={account.isProjected[i]}
