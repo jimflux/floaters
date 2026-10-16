@@ -1,5 +1,7 @@
 // Shared API contract between the API, web, and MCP server.
 // The canonical source of truth for the cashflow response shape.
+import type { CostBreakdown, CostForecastReview } from './costs';
+export * from './costs';
 
 export interface CashflowAccount {
   accountCode: string;
@@ -8,6 +10,7 @@ export interface CashflowAccount {
   monthly: number[]; // one per month, same order as months[]
   isProjected: boolean[]; // true if the month is a projection
   hasOverride: boolean[]; // true if the month has a manual projection override
+  breakdown?: CostBreakdown[]; // actual cash + bills + estimates + manual adjustment
 }
 
 export interface CashflowAccountInfo {
@@ -62,6 +65,7 @@ export interface CashflowResponse {
   optimisticClosing: number[];
   optimisticNet: number[];
   accounts: CashflowAccountInfo[];
+  costForecast?: CostForecastReview;
   // VAT (present only when VAT is enabled). The VAT quarterly bill also appears
   // as a display-only cost row in cashOut with accountCode "VAT_LIABILITY".
   vatAdjustedClosing?: number[]; // committed closing minus VAT owed; true spendable cash
