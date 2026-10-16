@@ -1,15 +1,15 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 vi.mock('@/components/ui/toaster', () => ({ Toaster: () => null }));
 vi.mock('@/components/ui/sonner', () => ({ Toaster: () => null }));
-vi.mock('./pages/CashflowPage', () => ({ default: function Cashflow() {
+vi.mock('./pages/CashflowPage', () => ({ default: function Cashflow({ navigation }: { navigation?: ReactNode }) {
   const [value, setValue] = useState('Cashflow draft');
-  return <input aria-label="Cashflow state" value={value} onChange={event => setValue(event.target.value)} />;
+  return <><header>{navigation}</header><input aria-label="Cashflow state" value={value} onChange={event => setValue(event.target.value)} /></>;
 } }));
-vi.mock('./pages/RetirementPage', () => ({ default: function Retirement({ active }: { active: boolean }) {
+vi.mock('./pages/RetirementPage', () => ({ default: function Retirement({ active, navigation }: { active: boolean; navigation?: ReactNode }) {
   const [value, setValue] = useState('Retirement draft');
-  return <input data-active={active} aria-label="Retirement state" value={value} onChange={event => setValue(event.target.value)} />;
+  return <><header>{navigation}</header><input data-active={active} aria-label="Retirement state" value={value} onChange={event => setValue(event.target.value)} /></>;
 } }));
 import App from './App';
 beforeEach(() => { window.history.replaceState(null, '', '/'); });

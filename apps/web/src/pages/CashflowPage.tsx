@@ -49,7 +49,7 @@ function sumMonthly(accounts: CashflowAccount[], monthIndex: number): number {
   return accounts.reduce((sum, a) => sum + (a.monthly[monthIndex] || 0), 0);
 }
 
-export default function CashflowPage() {
+export default function CashflowPage({ navigation }: { navigation?: ReactNode }) {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const [incomeOpen, setIncomeOpen] = useState(true);
@@ -133,9 +133,9 @@ export default function CashflowPage() {
     onError: () => toast.error('Sync failed'),
   });
 
-  if (isLoading) return <LoadingSkeleton />;
+  if (isLoading) return <LoadingSkeleton navigation={navigation} />;
   if (isError && error instanceof SignInRequiredError) return (
-    <StatusScreen>
+    <StatusScreen navigation={navigation}>
       <p className="text-base text-muted-foreground">Your session has ended.</p>
       <Button asChild size="sm">
         <a href={loginUrl()}>Sign in</a>
@@ -143,15 +143,15 @@ export default function CashflowPage() {
     </StatusScreen>
   );
   if (isError) return (
-    <StatusScreen>
+    <StatusScreen navigation={navigation}>
       <p className="text-base text-muted-foreground">Failed to load data: {(error as Error).message}</p>
       <Button size="sm" onClick={() => queryClient.invalidateQueries({ queryKey: ['cashflow'] })}>Retry</Button>
     </StatusScreen>
   );
-  if (!data) return null;
+  if (!data) return <LoadingSkeleton navigation={navigation} />;
 
   const rowControls = <ForecastRows data={data} exclusions={exclusions} onChange={setExclusions} />;
-  if (isMobile) return <CashflowMobile data={data} overrideAmounts={overrideAmounts} time={time} rowControls={rowControls} />;
+  if (isMobile) return <CashflowMobile navigation={navigation} data={data} overrideAmounts={overrideAmounts} time={time} rowControls={rowControls} />;
 
   const { currentBalance, fallsBelowZeroIn, optimisticFallsBelowZeroIn, currentMonthIndex, months, income, cashOut, committedOpening, committedClosing, committedNet, optimisticClosing, optimisticNet, accounts = [], vatOwedNow, vatAdjustedClosing, vatProjectedBill, vatCurrentQuarter } = data;
   const currentMonth = months[currentMonthIndex];
@@ -182,12 +182,12 @@ export default function CashflowPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="flex items-center justify-between gap-4 px-6 h-[72px] bg-aubergine text-cloud">
-        <span className="flex items-center gap-2.5">
+      <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-3 min-h-[72px] bg-aubergine text-cloud">
+        <div className="flex flex-wrap items-center gap-4"><span className="flex items-center gap-2.5">
           <FluxMark className="h-7 w-auto" />
           <span className="font-display font-extrabold text-[28px] leading-none tracking-[-0.05em]">Floaters</span>
-        </span>
-        <div className="flex items-center gap-2.5">
+        </span>{navigation}</div>
+        <div className="flex flex-wrap items-center gap-2.5">
           {lastSync && <span className="text-xs text-muted-on-aubergine mr-1">Synced {formatTimeAgo(lastSync)}</span>}
           {rowControls}
           <ForecastViewToggle view={view} onChange={setView} tone="dark" />
@@ -477,10 +477,10 @@ function AddAccountButton({ section, allAccounts, existingCodes, months, current
   );
 }
 
-function LoadingSkeleton() {
+function LoadingSkeleton({ navigation }: { navigation?: ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
-      <div className="h-[72px] bg-aubergine" />
+      <header className="flex flex-wrap items-center gap-4 bg-aubergine px-4 py-3 text-cloud"><span className="font-display text-2xl font-extrabold">Floaters</span>{navigation}</header>
       <div className="px-6 py-6 space-y-6">
         <Skeleton className="h-[240px] rounded-card" />
         <Skeleton className="h-[400px] rounded-card" />
@@ -490,13 +490,13 @@ function LoadingSkeleton() {
 }
 
 // Signed-out and error states: the brand mark, the message, one action.
-function StatusScreen({ children }: { children: ReactNode }) {
+function StatusScreen({ children, navigation }: { children: ReactNode; navigation?: ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-5 px-6 bg-background text-foreground text-center">
+    <div className="min-h-screen bg-background text-foreground"><header className="flex flex-wrap items-center gap-4 bg-aubergine px-4 py-3 text-cloud"><span className="font-display text-2xl font-extrabold">Floaters</span>{navigation}</header><div className="flex min-h-[70vh] flex-col items-center justify-center gap-5 px-6 text-center">
       <FluxMark className="h-14 w-auto" />
       <p className="font-display font-extrabold text-[32px] leading-none tracking-[-0.05em]">Floaters</p>
       {children}
-    </div>
+    </div></div>
   );
 }
 

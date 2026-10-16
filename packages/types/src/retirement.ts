@@ -2,10 +2,13 @@ export const RETIREMENT_ASSETS = ['pension', 'isa', 'investments', 'cash'] as co
 export const RETIREMENT_CASES = ['cautious', 'base', 'optimistic'] as const;
 export type RetirementAssetKey = typeof RETIREMENT_ASSETS[number];
 export type RetirementCase = typeof RETIREMENT_CASES[number];
+// Missing basis preserves legacy amounts in balance-date purchasing power.
+export type RetirementAmountBasis = 'real' | 'nominal';
 export interface RetirementAsset {
   balance: number;
   annualContribution: number;
-  contributionGrowth: number; // decimal, real growth
+  contributionBasis?: RetirementAmountBasis; // also governs linked payments beyond the source window
+  contributionGrowth: number; // decimal annual growth, above inflation for real contributions
   returns: Record<RetirementCase, number>; // decimal, real annual returns net of fees
   grossReturns?: Record<RetirementCase, number>; // nominal, before annual fees and inflation
   annualFee?: number;
@@ -27,6 +30,7 @@ export interface RetirementIncome {
   startAge: number;
   endAge: number;
   annualAmount: number;
+  amountBasis?: RetirementAmountBasis;
   taxable: boolean;
   kind?: 'state-pension' | 'employment' | 'other';
   confirmed?: boolean;
@@ -45,6 +49,7 @@ export interface RetirementOneOff {
   person: 0 | 1;
   asset: RetirementAssetKey;
   amount: number; // positive deposit / negative withdrawal from the portfolio
+  amountBasis?: RetirementAmountBasis;
 }
 export interface RetirementPensionLink {
   accountCode: string;
@@ -78,6 +83,10 @@ export interface RetirementPlan {
   childSavings?: RetirementChildSavings; // tracked separately; never used for retirement drawdown
 }
 export interface RetirementYear {
+  yearFraction: number; // remaining fraction of the first year; later years are 1
+  withdrawalsByAsset: Record<RetirementAssetKey, number>; // gross withdrawals for spending/tax
+  spendingShortfall: number; // unmet spending and tax after income and accessible withdrawals
+  oneOffShortfall: number; // blocked or insufficient planned one-off withdrawals
   year: number;
   age: number;
   partnerAge: number | null;
@@ -110,6 +119,7 @@ export function retirementPlanErrors(value: unknown): string[] {
   const number = (v: unknown, min: number, max: number, label: string, integer = false) => {
     if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max || (integer && !Number.isInteger(v))) errors.push(`${label} must be ${integer ? 'a whole number ' : ''}between ${min} and ${max}.`);
   };
+  const basis = (v: unknown, label: string) => { if (v !== undefined && v !== 'real' && v !== 'nominal') errors.push(`${label} must use real or nominal amounts.`); };
   const text = (v: unknown, label: string) => { if (typeof v !== 'string' || !v.trim() || v.length > 100) errors.push(`${label} is required (up to 100 characters).`); };
   const readDate = (v: unknown) => {
     if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
@@ -159,6 +169,7 @@ export function retirementPlanErrors(value: unknown): string[] {
       if (!object(a)) { errors.push(`${p.name} ${key} is missing.`); continue; }
       number(a.balance, 0, 100000000, `${p.name} ${key} balance`);
       number(a.annualContribution, 0, 1000000, `${p.name} ${key} contribution`);
+      basis(a.contributionBasis, `${p.name} ${key} contribution basis`);
       number(a.contributionGrowth, -0.5, 0.5, `${p.name} ${key} contribution growth`);
       if (a.annualFee !== undefined) number(a.annualFee, 0, 0.1, `${p.name} ${key} annual fee`);
       if (a.feesConfirmed !== undefined && typeof a.feesConfirmed !== 'boolean') errors.push('Fee confirmation must be true or false.');
@@ -185,6 +196,7 @@ export function retirementPlanErrors(value: unknown): string[] {
     const ids = new Set<string>();
     entries.forEach((r, i) => {
       if (!object(r)) { errors.push(`${key} row ${i + 1} is missing.`); return; }
+      if (key !== 'spending') basis(r.amountBasis, `${key} amount basis`);
       text(r.id, `${key} row id`); text(r.label, `${key} row label`);
       if (typeof r.id === 'string' && ids.has(r.id)) errors.push(`${key} row ids must be unique.`);
       if (typeof r.id === 'string') ids.add(r.id);

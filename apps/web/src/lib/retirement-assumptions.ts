@@ -1,4 +1,4 @@
-import type { RetirementAsset, RetirementCase, RetirementPlan } from '@floaters/types';
+import { RETIREMENT_ASSETS, RETIREMENT_CASES, type RetirementAsset, type RetirementCase, type RetirementPlan } from '@floaters/types';
 
 export const DEFAULT_INFLATION = 0.025;
 export const FULL_STATE_PENSION_2026 = 241.30 * 52;
@@ -18,6 +18,23 @@ export function assetFee(asset: RetirementAsset, priceIndex = 1): number {
 
 export function assetReturn(asset: RetirementAsset, scenario: RetirementCase, inflation: number, priceIndex = 1): number {
   return asset.grossReturns ? realReturn(asset.grossReturns[scenario], assetFee(asset, priceIndex), inflation) : asset.returns[scenario];
+}
+
+/** Recover the nominal assumptions behind legacy net real returns without changing their value. */
+export function nominalReturns(asset: RetirementAsset, inflation: number): Record<RetirementCase, number> {
+  return asset.grossReturns ?? Object.fromEntries(RETIREMENT_CASES.map(scenario => [scenario,
+    (1 + asset.returns[scenario]) * (1 + inflation) / (1 - assetFee(asset)) - 1,
+  ])) as Record<RetirementCase, number>;
+}
+
+/** Pin nominal returns before editing inflation, including cash and disabled partner assets. */
+export function setRetirementInflation(draft: RetirementPlan, inflation: number): void {
+  for (const person of draft.people) for (const key of RETIREMENT_ASSETS) {
+    const asset = person.assets[key];
+    asset.grossReturns = nominalReturns(asset, draft.inflation ?? DEFAULT_INFLATION);
+    asset.annualFee ??= 0;
+  }
+  draft.inflation = inflation;
 }
 
 export function projectionEndAge(plan: RetirementPlan): number {

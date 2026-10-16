@@ -3,6 +3,7 @@ import type { RetirementStress } from './retirement';
 
 export interface RetirementMilestone {
   id: string;
+  kind: 'retirement' | 'access' | 'income' | 'one-off' | 'survivor';
   label: string;
   detail: string;
 }
@@ -46,9 +47,9 @@ export function retirementMilestones(plan: RetirementPlan, visibleYears: readonl
   plan.people.forEach((person, index) => {
     if (!enabled(index)) return;
     const retirementYear = yearAtAge(index, person.retirementAge);
-    if (alive(index, retirementYear)) add(retirementYear, { id: `retire-${index}`, label: `${person.name}: retirement`, detail: `Planned retirement at age ${person.retirementAge}. Regular savings stop at this age.` });
+    if (alive(index, retirementYear)) add(retirementYear, { id: `retire-${index}`, kind: 'retirement', label: `${person.name}: retirement`, detail: `Planned retirement at age ${person.retirementAge}. Regular savings stop at this age.` });
     const accessYear = yearAtAge(index, person.pensionAccessAge);
-    if (alive(index, accessYear)) add(accessYear, { id: `access-${index}`, label: `${person.name}: pension access`, detail: `The plan allows pension withdrawals from age ${person.pensionAccessAge}. Money is drawn only when needed.` });
+    if (alive(index, accessYear)) add(accessYear, { id: `access-${index}`, kind: 'access', label: `${person.name}: pension access`, detail: `The plan allows pension withdrawals from age ${person.pensionAccessAge}. Money is drawn only when needed.` });
   });
 
   for (const row of plan.income) {
@@ -57,14 +58,14 @@ export function retirementMilestones(plan: RetirementPlan, visibleYears: readonl
     const year = yearAtAge(row.person, startAge);
     if (startAge > row.endAge || !alive(row.person, year)) continue;
     const label = row.kind === 'state-pension' ? 'State Pension starts' : row.kind === 'employment' ? 'work starts' : `${row.label} starts`;
-    add(year, { id: `income-${row.id}`, label: `${plan.people[row.person].name}: ${label}`, detail: `${row.label} · ${money(row.annualAmount)}/year from age ${startAge}${row.kind === 'state-pension' && !row.confirmed ? ' · entitlement unconfirmed' : ''}.` });
+    add(year, { id: `income-${row.id}`, kind: 'income', label: `${plan.people[row.person].name}: ${label}`, detail: `${row.label} · ${money(row.annualAmount)}/year from age ${startAge}${row.kind === 'state-pension' && !row.confirmed ? ' · entitlement unconfirmed' : ''}.` });
   }
 
   for (const row of plan.oneOffs) {
     if (!enabled(row.person) || row.amount === 0 || !alive(row.person, row.year)) continue;
-    add(row.year, { id: `oneoff-${row.id}`, label: row.label, detail: `${plan.people[row.person].name} · planned ${money(Math.abs(row.amount))} ${row.amount > 0 ? 'into' : 'out of'} ${row.asset === 'isa' ? 'ISA' : row.asset}.` });
+    add(row.year, { id: `oneoff-${row.id}`, kind: 'one-off', label: row.label, detail: `${plan.people[row.person].name} · planned ${money(Math.abs(row.amount))} ${row.amount > 0 ? 'into' : 'out of'} ${row.asset === 'isa' ? 'ISA' : row.asset}.` });
   }
 
-  if (deceased !== null) add(yearAtAge(deceased, 85), { id: 'survivor', label: 'Survivor illustration begins', detail: `${plan.people[deceased].name} dies at 85 in this stress test. Income stops and the survivor inherits the assets.` });
+  if (deceased !== null) add(yearAtAge(deceased, 85), { id: 'survivor', kind: 'survivor', label: 'Survivor illustration begins', detail: `${plan.people[deceased].name} dies at 85 in this stress test. Income stops and the survivor inherits the assets.` });
   return [...groups.values()].sort((a, b) => a.year - b.year);
 }

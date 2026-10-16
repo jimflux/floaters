@@ -147,10 +147,12 @@ describe('retirement persistence', () => {
     plan.people[0].assets.pension.grossReturns = { cautious: 0.02, base: 0.05, optimistic: 0.07 };
     plan.people[0].assets.pension.annualFee = 0.005;
     plan.people[0].assets.pension.feesConfirmed = false;
+    plan.people[0].assets.pension.contributionBasis = 'nominal';
+    plan.income = [{ id: 'fixed', label: 'Fixed annuity', person: 0, startAge: 65, endAge: 120, annualAmount: 10000, taxable: true, amountBasis: 'nominal' }];
     plan.people[0].assets.pension.feeSchedule = { threshold: 100000, below: 0.006, above: 0.002, fundCost: 0.001, marketSpread: 0.0005 };
     plan.childSavings = { name: 'Example child', balanceDate: '2026-10-14', jisa: 1200, universityFund: 500,
       ageAtBalanceDate: 6, monthlyUniContribution: 120, jisaAnnualReturn: 0.04, universityAnnualReturn: 0.06 };
-    plan.oneOffs = [{ id: 'purchase', label: 'Planned purchase', person: 0, asset: 'isa', year: 2030, amount: -5000 }];
+    plan.oneOffs = [{ id: 'purchase', label: 'Planned purchase', person: 0, asset: 'isa', year: 2030, amount: -5000, amountBasis: 'nominal' }];
     plan.pensionLinks = [{ accountCode: 'PENSION', person: 0, share: 0.4, startYear: 2026 }, { accountCode: 'PENSION', person: 1, share: 0.6, startYear: 2027 }];
     const response = await PUT(request(plan));
     expect(response.status).toBe(200);

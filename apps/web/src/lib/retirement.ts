@@ -2,6 +2,7 @@ import {
   RETIREMENT_ASSETS,
   retirementPlanErrors,
   type RetirementAsset,
+  type RetirementAmountBasis,
   type RetirementCase,
   type RetirementPerson,
   type RetirementPlan,
@@ -141,7 +142,12 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     const yearFraction = offset === 0 ? firstYearFraction : 1;
     const year = draft.startYear + offset;
     const age = draft.people[0].age + offset;
-    const priceIndex = (1 + inflation) ** offset;
+    // All annual flows settle at year end, matching the growth-then-flows order.
+    // Fee tiers use the opening nominal pot; tax and payments use the closing index.
+    const elapsedStart = offset === 0 ? 0 : firstYearFraction + offset - 1;
+    const openingPriceIndex = (1 + inflation) ** elapsedStart;
+    const priceIndex = (1 + inflation) ** (elapsedStart + yearFraction);
+    const realAmount = (amount: number, basis?: RetirementAmountBasis) => basis === 'nominal' ? amount / priceIndex : amount;
     // Survivor illustrations: death at 85, 70% of shared spending, all assets
     // inherited by the survivor. Death after 75 makes inherited pension taxable.
     const lostPerson = stress === 'lose-you' ? 0 : stress === 'lose-partner' ? 1 : null;
@@ -164,12 +170,13 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
     let income = 0;
     let tax = 0;
     let withdrawals = 0;
+    const withdrawalsByAsset = { pension: 0, isa: 0, investments: 0, cash: 0 };
     let oneOffShortfall = 0;
 
     for (const state of states) {
       if (!state.alive) continue;
       const grow = (asset: RetirementAsset, invested: boolean) => {
-        let rate = assetReturn(asset, scenario, inflation, priceIndex);
+        let rate = assetReturn(asset, scenario, inflation, openingPriceIndex);
         if (invested && stress === 'weak-returns' && offset >= retirementOffset && offset < retirementOffset + 10) rate -= 0.02;
         if (invested && stress === 'market-drop' && offset === retirementOffset) asset.balance *= 0.7;
         asset.balance = Math.max(0, asset.balance * (1 + rate) ** yearFraction);
@@ -180,7 +187,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         grow(asset, key !== 'cash');
         if (state.age < state.person.retirementAge) {
           const linked = key === 'pension' ? pensionContributionForYear(draft, state.index, year, source) : null;
-          const contribution = linked ? linked.amount / priceIndex : asset.annualContribution * (1 + asset.contributionGrowth) ** offset * yearFraction;
+          const contribution = linked ? linked.amount / priceIndex : realAmount(asset.annualContribution * (1 + asset.contributionGrowth) ** elapsedStart, asset.contributionBasis) * yearFraction;
           asset.balance += contribution;
           contributions += contribution;
           contributionsByPerson[state.index][key] += contribution;
@@ -192,22 +199,23 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
       const state = states[row.person];
       const delayed = stress === 'later-state-pension' && row.kind === 'state-pension' ? 2 : 0;
       if (!state?.alive || state.age < row.startAge + delayed || state.age > row.endAge) continue;
-      income += row.annualAmount * yearFraction;
+      const annualIncome = realAmount(row.annualAmount, row.amountBasis);
+      income += annualIncome * yearFraction;
       // Keep annual income for pension marginal tax; regular tax below is
       // apportioned over the remaining year at the same annual income rate.
-      if (row.taxable) state.taxableIncome += row.annualAmount;
+      if (row.taxable) state.taxableIncome += annualIncome;
     }
     tax = states.reduce((total, state) => total + incomeTax(state.taxableIncome * priceIndex, year, inflation) / priceIndex * yearFraction, 0);
 
     // Apply deposits before withdrawals so paired rows do not depend on row order.
     const oneOffs = draft.oneOffs.filter(row => row.year === year && states[row.person]?.alive);
     for (const row of oneOffs) {
-      if (row.amount > 0) states[row.person].person.assets[row.asset].balance += row.amount;
+      if (row.amount > 0) states[row.person].person.assets[row.asset].balance += realAmount(row.amount, row.amountBasis);
     }
     for (const row of oneOffs) {
       if (row.amount >= 0) continue;
       const state = states[row.person];
-      const desired = -row.amount;
+      const desired = realAmount(-row.amount, row.amountBasis);
       if (row.asset === 'pension' && state.age < state.person.pensionAccessAge) {
         oneOffShortfall += desired;
         continue;
@@ -243,6 +251,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         const gross = grossForNet(choice.pot, deficit, choice.gross);
         const quote = takePension(choice.pot, gross);
         withdrawals += gross;
+        withdrawalsByAsset.pension += gross;
         tax += quote.tax;
         deficit = Math.max(0, deficit - quote.net);
       }
@@ -254,6 +263,7 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
         const amount = Math.min(deficit, asset.balance);
         asset.balance -= amount;
         withdrawals += amount;
+        withdrawalsByAsset[key] += amount;
         deficit -= amount;
       }
     };
@@ -275,8 +285,9 @@ export function projectRetirement(plan: RetirementPlan, scenario: RetirementCase
       }
     }
     const totalAssets = RETIREMENT_ASSETS.reduce((total, key) => total + balances[key], 0);
-    const shortfall = oneOffShortfall + (deficit < 1e-7 ? 0 : deficit);
-    projection.years.push({ year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, contributionsByPerson, income, spending, tax, withdrawals, shortfall });
+    const spendingShortfall = deficit < 1e-7 ? 0 : deficit;
+    const shortfall = oneOffShortfall + spendingShortfall;
+    projection.years.push({ yearFraction, withdrawalsByAsset, spendingShortfall, oneOffShortfall, year, age, partnerAge: draft.partnerEnabled ? draft.people[1].age + offset : null, totalAssets, accessibleAssets, ...balances, contributions, contributionsByPerson, income, spending, tax, withdrawals, shortfall });
     if (age === draft.people[0].retirementAge) projection.assetsAtRetirement = totalAssets;
     if (shortfall > 0 && !projection.firstShortfall) projection.firstShortfall = { year, age, amount: shortfall };
   }

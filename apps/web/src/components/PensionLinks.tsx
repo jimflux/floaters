@@ -54,14 +54,14 @@ export function PensionLinks({ plan, onChange, source, loading, error, loadedAt,
       if (age >= plan.people[person].retirementAge) return <p key={person} className="mt-3 text-sm">{person === 0 ? 'You' : 'Partner'}: regular contributions stop at retirement age.</p>;
       try {
         const annual = pensionContributionForYear(plan, person, year, source);
-        return annual && <p key={person} className="mt-3 text-sm font-semibold">{person === 0 ? 'You' : 'Partner'} · {year}: {money(annual.amount)} {annual.estimated ? '(estimated: includes forecast amounts)' : '(known monthly amounts)'}{annual.extended ? ' · extended beyond source window' : ''}</p>;
+        return annual && <p key={person} className="mt-3 text-sm font-semibold">{person === 0 ? 'You' : 'Partner'} · {year}: {money(annual.amount)} in actual cash payments {annual.estimated ? '(estimated: includes forecast amounts)' : '(known monthly amounts)'}{annual.extended ? ' · extended beyond source window' : ''}</p>;
       } catch (failure) {
         return <p role="alert" key={person} className="mt-3 text-sm">{failure instanceof Error ? failure.message : 'Could not calculate linked contributions.'} For missing history, update your baseline year, ages and opening balances, or link from a later year.</p>;
       }
     })}
     <details className="mt-2 space-y-2 text-xs text-muted-foreground"><summary className="cursor-pointer font-semibold">How linked contributions work</summary>
       <p>Uses saved, unexcluded Floaters cashflow. Temporary what-if exclusions do not change this source. Known payments and projected monthly amounts are already combined: paid amounts are not added again.</p>
-      <p>Beyond the last forecast month, the final monthly amount repeats. Inflation plus your real pension contribution-growth assumption applies in subsequent calendar years. Source amounts are nominal; the retirement forecast converts them into balance-date pounds. These extensions are estimates.</p>
+      <p>Beyond the last forecast month, the final monthly amount repeats. In subsequent calendar years, your pension contribution growth applies. “Keep pace with inflation” also adds inflation; “Fixed cash amount” does not. Choose this under Advanced assumptions. Known source payments are never increased again. Source amounts are nominal; the retirement forecast converts them into balance-date pounds. These extensions are estimates.</p>
       <p>Balances use your chosen balance date. For a mid-month balance, linked contributions resume the following month; on the first day of a month, that month is included. Earlier payments are already covered by your balances. Do not also enter the same payments as one-offs. Linking does not query a pension provider balance or add company cash balances.</p>
       <p>Manual pension amounts are kept for years before links start and are restored when you disconnect. If the baseline predates the first link, the manual amount remains editable for those earlier years.</p>
     </details>
