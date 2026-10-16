@@ -53,7 +53,7 @@ export interface CashflowResponse {
   currentBalance: number;
   fallsBelowZeroIn: string | null; // committed; format string-matched by the web
   optimisticFallsBelowZeroIn: string | null;
-  fallsBelowZeroMonth?: string | null; // yyyy-MM; all known events, then ongoing average costs
+  fallsBelowZeroMonth?: string | null; // yyyy-MM; all known events, then repeating cost schedules and variable estimates
   optimisticFallsBelowZeroMonth?: string | null;
   currentMonthIndex: number;
   months: string[]; // ["2025-12", "2026-01", ...]

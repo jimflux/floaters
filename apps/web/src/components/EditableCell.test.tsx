@@ -156,3 +156,30 @@ describe("EditableCell override pre-fill", () => {
     expect((input as HTMLInputElement).value).toBe("2000");
   });
 });
+
+it('explains the cost forecast and the expected-total override floor', async () => {
+  const qc = new QueryClient();
+  render(<QueryClientProvider client={qc}><EditableCell value={600} accountCode="400" month="2026-07" isProjected hasOverride={false} isCurrentMonth={false} months={['2026-07']} monthIndex={0} as="div" breakdown={{ actual: 100, bills: 30, recurring: 270, variable: 200, adjustment: 0, method: 'Recent variable spending average' }} /></QueryClientProvider>);
+  fireEvent.click(screen.getByRole('button'));
+  expect(await screen.findByLabelText('Expected month total')).toBeInTheDocument();
+  expect(screen.getByText('Cash already paid')).toBeInTheDocument();
+  expect(screen.getByText('Unpaid bills')).toBeInTheDocument();
+  expect(screen.getByText('Remaining recurring costs')).toBeInTheDocument();
+  expect(screen.getByText('Variable estimate')).toBeInTheDocument();
+  expect(screen.getByText('Manual adjustment')).toBeInTheDocument();
+  expect(screen.getByText('Recent variable spending average')).toBeInTheDocument();
+  expect(screen.getByText(/cannot reduce cash already paid or unpaid bills/)).toBeInTheDocument();
+});
+
+it('keeps known cash and bills as the optimistic floor while saving the raw override', async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const data = seedData();
+  data.cashOut[0].breakdown = Array.from({ length: 3 }, () => ({ actual: 100, bills: 200, recurring: 0, variable: 0, adjustment: 0, method: 'Known cash and bills' }));
+  qc.setQueryData(['cashflow'], data);
+  renderCell(qc);
+  fireEvent.click(screen.getByRole('button'));
+  fireEvent.change(await screen.findByRole('spinbutton'), { target: { value: '50' } });
+  fireEvent.click(screen.getByText('Save'));
+  await waitFor(() => expect(setOverride).toHaveBeenCalledWith('400', '2026-07', 50));
+  expect(qc.getQueryData<CashflowData>(['cashflow'])!.cashOut[0].monthly[2]).toBe(300);
+});

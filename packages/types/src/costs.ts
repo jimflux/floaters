@@ -8,6 +8,8 @@ export interface CostRule {
   frequencyMonths: 1 | 3 | 12;
   startMonth: string;
   endMonth: string | null;
+  /** Imported streams explicitly reviewed as the same cost. */
+  matchStreamKeys?: string[];
 }
 
 export interface CostSettings {
@@ -46,4 +48,6 @@ export interface CostForecastReview {
   settings: CostSettings;
   suggestions: CostSuggestion[];
   recentPayments: CostPayment[];
+  streams?: { streamKey: string; accountCode: string; label: string }[];
+  managedAccountCodes?: string[];
 }

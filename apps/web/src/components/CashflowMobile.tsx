@@ -13,6 +13,7 @@ import EditableCell from '@/components/EditableCell';
 import AlignedChart from '@/components/AlignedChart';
 import ForecastViewToggle from '@/components/ForecastViewToggle';
 import TimePanel from '@/components/TimePanel';
+import CostForecastPanel from '@/components/CostForecastPanel';
 import { formatHours, monthIndexer } from '@/lib/time';
 import { useForecastView } from '@/hooks/use-forecast-view';
 import { moneyTone, zeroChip, zeroDateLabel, RUNWAY_DESCRIPTION, LAYER_DOT } from '@/lib/brand';
@@ -80,6 +81,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
   // subtotals carry the story.
   const [clientsOpen, setClientsOpen] = useState(false);
   const [costsOpen, setCostsOpen] = useState(true);
+  const [costForecastOpen, setCostForecastOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const [hoursOpen, setHoursOpen] = useState(false);
@@ -263,6 +265,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
         )}
 
         {/* Costs */}
+        <div className="px-4 py-2 bg-card"><Button variant="outline" size="sm" onClick={() => setCostForecastOpen(true)}>Review cost forecasts</Button></div>
         <div className="h-3 bg-card" />
         <SectionHeaderMobile
           label="↘ Costs"
@@ -294,6 +297,7 @@ export default function CashflowMobile({ data, overrideAmounts = new Map(), time
 
       <AccountManagementPanel open={settingsOpen} onOpenChange={setSettingsOpen} accounts={accounts} vatClients={income.clients} vatCurrentQuarter={vatCurrentQuarter} />
       <PipelinePanel open={pipelineOpen} onOpenChange={setPipelineOpen} pipeline={pipeline} />
+      <CostForecastPanel open={costForecastOpen} onOpenChange={setCostForecastOpen} forecast={data.costForecast} accounts={accounts} currentMonth={months[currentMonthIndex]} />
       <TimePanel open={timeOpen} onOpenChange={setTimeOpen} time={time} />
     </div>
   );
@@ -437,6 +441,7 @@ function AccountRowMobile({ account, monthIndex, months, currentMonthIndex, isAl
         ) : (
           <EditableCell
             value={account.monthly[monthIndex]}
+            breakdown={account.breakdown?.[monthIndex]}
             accountCode={account.accountCode}
             month={months[monthIndex]}
             isProjected={account.isProjected[monthIndex]}

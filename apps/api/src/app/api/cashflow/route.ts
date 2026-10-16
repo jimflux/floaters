@@ -5,10 +5,14 @@ import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { z } from "zod/v4";
 import { monthsBetween, zeroBalanceMonth } from "@/lib/runway";
 import { HISTORY_MONTHS } from "@/lib/xero/sync";
+import { createCostForecast, costStreamKey } from '@/lib/cost-forecast';
+import { loadCostSettings } from '@/lib/cost-settings';
+import type { CostPayment } from '@floaters/types';
 import {
   expandProjection,
   invoiceBucketMonth,
   clientKey,
+  addMonthKey,
   type ProjectionRow,
 } from "@/lib/pipeline";
 import {
@@ -31,9 +35,6 @@ import type {
 const INCOME_TYPES = new Set(["REVENUE", "SALES", "OTHERINCOME"]);
 // Everything that isn't income goes into costs
 
-// Cost projections use a 3-month historical average
-const HISTORY_FOR_AVG = 3;
-
 // back is capped at the synced history depth: months beyond it would show
 // payments against zero bank data and reconstruct confidently wrong balances
 const querySchema = z.object({
@@ -44,6 +45,7 @@ const querySchema = z.object({
 });
 
 interface LineItem {
+  LineItemID?: string;
   AccountCode: string;
   LineAmount: number;
   Description?: string;
@@ -72,9 +74,9 @@ export async function GET(request: NextRequest) {
     const now = startOfMonth(new Date());
     const from = subMonths(now, monthsBack);
     const to = addMonths(now, monthsForward);
-    // Cash is fetched at least 3 months back so the cost average holds up
-    // even when the visible window is narrower
-    const cashFrom = subMonths(now, Math.max(monthsBack, HISTORY_FOR_AVG));
+    // Review annual payments and compare recent estimators using synced history,
+    // independently of the chart's visible window.
+    const cashFrom = subMonths(now, HISTORY_MONTHS);
 
     // Build month keys
     const months: string[] = [];
@@ -100,18 +102,20 @@ export async function GET(request: NextRequest) {
       vatStateResult,
       vatableResult,
       vatInvoiceResult,
+      costSettings,
     ] = await Promise.all([
-      supabase
+      readCashPages((start, end) => supabase
         .from("xero_bank_transactions")
-        .select("type, total, date, status, line_items")
+        .select("xero_id, contact_name, type, total, date, status, line_items")
         .eq("connection_id", connectionId)
         .gte("date", format(cashFrom, "yyyy-MM-dd"))
-        .order("date", { ascending: true }),
-      supabase
+        .order("date", { ascending: true }).order("xero_id", { ascending: true }).range(start, end)),
+      readCashPages((start, end) => supabase
         .from("xero_payments")
-        .select("payment_type, amount, date, status, invoice_xero_id")
+        .select("xero_id, payment_type, amount, date, status, invoice_xero_id")
         .eq("connection_id", connectionId)
-        .gte("date", format(cashFrom, "yyyy-MM-dd")),
+        .gte("date", format(cashFrom, "yyyy-MM-dd"))
+        .order("date", { ascending: true }).order("xero_id", { ascending: true }).range(start, end)),
       supabase
         .from("xero_invoices")
         .select(
@@ -172,6 +176,7 @@ export async function GET(request: NextRequest) {
         .eq("connection_id", connectionId)
         .eq("type", "ACCREC")
         .gte("issue_date", format(subMonths(now, 8), "yyyy-MM-dd")),
+      loadCostSettings(connectionId),
     ]);
 
     const bankTxns = bankTxnResult.data || [];
@@ -195,16 +200,14 @@ export async function GET(request: NextRequest) {
           .map((p) => p.invoice_xero_id as string)
       ),
     ];
-    const attributionInvoices =
-      paymentInvoiceIds.length > 0
-        ? (
-            await supabase
-              .from("xero_invoices")
-              .select("xero_id, type, total, line_items, contact_id, contact_name")
-              .eq("connection_id", connectionId)
-              .in("xero_id", paymentInvoiceIds)
-          ).data || []
-        : [];
+    const attributionInvoices = [];
+    for (let offset = 0; offset < paymentInvoiceIds.length; offset += 100) {
+      const { data, error: invoiceError } = await supabase.from('xero_invoices')
+        .select('xero_id, type, total, line_items, contact_id, contact_name')
+        .eq('connection_id', connectionId).in('xero_id', paymentInvoiceIds.slice(offset, offset + 100));
+      if (invoiceError) throw new Error('Could not load payment attribution');
+      attributionInvoices.push(...(data ?? []));
+    }
     const invoiceById = new Map(
       attributionInvoices.map((inv) => [inv.xero_id as string, inv])
     );
@@ -234,7 +237,7 @@ export async function GET(request: NextRequest) {
 
     // -----------------------------------------------------------------------
     // Income: a pipeline of items rolled up by client in three layers.
-    // Costs: the account model, unchanged.
+    // Costs: cash ledger plus reviewed schedules and variable estimates.
     // -----------------------------------------------------------------------
 
     type MonthTotals = Map<string, number>;
@@ -243,6 +246,8 @@ export async function GET(request: NextRequest) {
 
     const actualOut: AccountMap = new Map();
     const projectedOut: AccountMap = new Map();
+    const costCash: CostPayment[] = [];
+    const costBills: CostPayment[] = [];
     // Net actual cash per month (in minus out) across every flow; drives the
     // balance anchor split for the current month. Whole ACCREC payments are
     // counted here — the walk reconciles to the bank, not to the account
@@ -355,34 +360,44 @@ export async function GET(request: NextRequest) {
       monthKey: string,
       dir: 1 | -1,
       amount: number,
-      lineItems: LineItem[]
+      lineItems: LineItem[],
+      document: { id: string; supplier: string; date: string }
     ) {
+      function record(code: string, name: string, type: string, cash: number, description: string, lineId: string | number) {
+        add(code, name, type, monthKey, cash);
+        if (!INCOME_TYPES.has(type)) {
+          (add === addActual ? costCash : costBills).push({
+            id: `${document.id}:${lineId}`, accountCode: code,
+            streamKey: costStreamKey(code, document.supplier, description),
+            label: [document.supplier, description].filter(Boolean).join(' · ') || 'Unspecified cost',
+            date: document.date, amount: -cash,
+          });
+        }
+      }
       const sum = lineItems.reduce((s, li) => s + li.LineAmount, 0);
       // Epsilon, not !== 0: lines cancelling to float noise must not divide
       if (lineItems.length > 0 && Math.abs(sum) > 0.005) {
-        for (const li of lineItems) {
+        for (const [index, li] of lineItems.entries()) {
           const acc = accountLookup.get(li.AccountCode);
           if (acc?.type === "BANK") continue;
           const cash = dir * amount * (li.LineAmount / sum);
           if (acc) {
-            add(li.AccountCode, acc.name, acc.type, monthKey, cash);
+            record(li.AccountCode, acc.name, acc.type, cash, li.Description ?? '', li.LineItemID ?? index);
           } else {
-            add(
+            record(
               "UNCATEGORISED",
               "Uncategorised",
               dir > 0 ? "REVENUE" : "EXPENSE",
-              monthKey,
-              cash
+              cash, li.Description ?? '', li.LineItemID ?? index
             );
           }
         }
       } else {
-        add(
+        record(
           "UNCATEGORISED",
           "Uncategorised",
           dir > 0 ? "REVENUE" : "EXPENSE",
-          monthKey,
-          dir * amount
+          dir * amount, '', 0
         );
       }
     }
@@ -403,7 +418,7 @@ export async function GET(request: NextRequest) {
       const monthKey = (txn.date as string).slice(0, 7);
       const lineItems = (txn.line_items as LineItem[] | null) || [];
       const add = (txn.date as string) > today ? addProjected : addActual;
-      distribute(add, monthKey, dir, Number(txn.total) || 0, lineItems);
+      distribute(add, monthKey, dir, Number(txn.total) || 0, lineItems, { id: `bank:${txn.xero_id ?? bankTxns.indexOf(txn)}`, supplier: txn.contact_name ?? '', date: txn.date });
     }
 
     // Invoice payments. ACCREC payments are whole-document income under their
@@ -445,7 +460,7 @@ export async function GET(request: NextRequest) {
       } else {
         const lineItems = (inv?.line_items as LineItem[] | null) || [];
         const add = postDated ? addProjected : addActual;
-        distribute(add, monthKey, dir, amount, lineItems);
+        distribute(add, monthKey, dir, amount, lineItems, { id: `payment:${p.xero_id ?? payments.indexOf(p)}`, supplier: inv?.contact_name ?? '', date: p.date });
       }
     }
 
@@ -475,7 +490,7 @@ export async function GET(request: NextRequest) {
         if (rawDate < today) clientFor(key).overdue.add(projMonth);
       } else {
         const lineItems = (inv.line_items as LineItem[] | null) || [];
-        distribute(addProjected, projMonth, -1, remaining, lineItems);
+        distribute(addProjected, projMonth, -1, remaining, lineItems, { id: `bill:${inv.xero_id}`, supplier: inv.contact_name ?? '', date: `${projMonth}-01` });
       }
     }
 
@@ -595,114 +610,31 @@ export async function GET(request: NextRequest) {
     const vatCommittedBill = (m: string) => excludedCosts.has("VAT_LIABILITY") ? 0 : vatResult?.committedBillByMonth.get(m) ?? 0;
     const vatOptimisticExtra = (m: string) => excludedCosts.has("VAT_LIABILITY") ? 0 : vatResult?.optimisticExtraByMonth.get(m) ?? 0;
 
-    // The last 3 calendar months before the current one, independent of the
-    // visible window (cash was fetched at least that far back)
-    const avgMonths: string[] = [];
-    for (let i = HISTORY_FOR_AVG; i >= 1; i--) {
-      avgMonths.push(format(subMonths(now, i), "yyyy-MM"));
-    }
-
-    // Ensure cost accounts with current/future overrides appear even without
-    // flows (income no longer reads overrides)
-    for (const [code] of overrideLookup) {
-      const acc = accountLookup.get(code);
-      if (!acc || acc.type === "BANK" || INCOME_TYPES.has(acc.type)) continue;
-      if (!actualOut.has(code)) {
-        addTo(actualOut, code, acc.name, acc.type, "", 0);
-      }
-    }
-
-    // Build per-account cost rows following the column semantics:
-    //   past = actual cash only; current = cash so far + projected remainder;
-    //   future = bill data (wins by presence), else override, else the
-    //   3-month average
+    const costForecast = createCostForecast({
+      currentMonth, historyFromMonth: format(cashFrom, 'yyyy-MM'), cash: costCash,
+      bills: costBills, settings: costSettings, overrides: overrideLookup,
+    });
+    const costCodes = [...costForecast.accountCodes].filter(code => {
+      const account = accountLookup.get(code);
+      return code === 'UNCATEGORISED' || (account && account.type !== 'BANK' && !INCOME_TYPES.has(account.type));
+    });
+    const costOptions = (code: string) => ({
+      excluded: excludedCosts.has(code) || (vatEnabled && vatAccountCodes.has(code) && excludedCosts.has('VAT_LIABILITY')),
+      knownOnly: vatEnabled && vatAccountCodes.has(code),
+    });
     function buildCostAccounts(): CashflowAccount[] {
-      const codes = new Set([...actualOut.keys(), ...projectedOut.keys()]);
-      const accounts: CashflowAccount[] = [];
-
-      for (const code of codes) {
-        const data = actualOut.get(code) || projectedOut.get(code)!;
-        const actual = actualOut.get(code)?.months;
-        const projected = projectedOut.get(code)?.months;
-        const accountOverrides = overrideLookup.get(code);
-
-        const avgValues = avgMonths.map((m) => actual?.get(m) || 0);
-        const managedVat = vatEnabled && vatAccountCodes.has(code);
-        const excluded = excludedCosts.has(code) || (managedVat && excludedCosts.has("VAT_LIABILITY"));
-        const avg = managedVat || excluded ? 0 : avgValues.reduce((a, b) => a + b, 0) / avgMonths.length;
-
-        const monthly: number[] = [];
-        const isProjected: boolean[] = [];
-        const hasOverride: boolean[] = [];
-
-        for (let i = 0; i < months.length; i++) {
-          const m = months[i];
-          const act = actual?.get(m);
-          const proj = excluded ? undefined : projected?.get(m);
-          const ovr = excluded || managedVat ? undefined : accountOverrides?.get(m);
-
-          if (i < currentMonthIndex) {
-            monthly.push(round(act || 0));
-            isProjected.push(false);
-            hasOverride.push(false);
-          } else if (i === currentMonthIndex) {
-            const cashMTD = act || 0;
-            let remainder = 0;
-            if (proj !== undefined) {
-              remainder = proj;
-            } else if (ovr !== undefined) {
-              remainder = Math.max(0, ovr - cashMTD);
-            } else if (avg > cashMTD) {
-              remainder = avg - cashMTD;
-            }
-            monthly.push(round(cashMTD + remainder));
-            isProjected.push(round(remainder) !== 0);
-            hasOverride.push(ovr !== undefined);
-          } else {
-            if (proj !== undefined) {
-              monthly.push(round(proj));
-              hasOverride.push(false);
-            } else if (ovr !== undefined) {
-              monthly.push(round(ovr));
-              hasOverride.push(true);
-            } else {
-              monthly.push(round(avg));
-              hasOverride.push(false);
-            }
-            isProjected.push(true);
-          }
-        }
-
-        // Stale past-month overrides must not create phantom all-zero rows
-        const hasLiveOverride = accountOverrides
-          ? [...accountOverrides.keys()].some(
-              (m) => m >= currentMonth && months.includes(m)
-            )
-          : false;
-
-        if (monthly.some((v) => v !== 0) || hasLiveOverride || excluded) {
-          accounts.push({
-            accountCode: code,
-            accountName: data.name,
-            excluded,
-            monthly,
-            isProjected,
-            hasOverride,
-          });
-        }
-      }
-
-      accounts.sort(
-        (a, b) =>
-          b.monthly.reduce((s, v) => s + v, 0) -
-          a.monthly.reduce((s, v) => s + v, 0)
-      );
-
-      return accounts;
+      return costCodes.map(code => {
+        const values = months.map(month => costForecast.estimate(code, month, costOptions(code)));
+        return {
+          accountCode: code, accountName: accountLookup.get(code)?.name ?? 'Uncategorised',
+          excluded: costOptions(code).excluded,
+          monthly: values.map(v => v.amount), isProjected: values.map(v => v.isProjected),
+          hasOverride: values.map(v => v.hasOverride), breakdown: values.map(v => v.breakdown),
+        };
+      }).filter(account => account.monthly.some(v => v !== 0) || account.hasOverride.some(Boolean) || account.excluded)
+        .sort((a, b) => b.monthly.reduce((s, v) => s + v, 0) - a.monthly.reduce((s, v) => s + v, 0));
     }
 
-    // Build the income section: client rows with per-layer series and the
-    // section's per-layer totals. Hidden accounts do not apply to income.
     function buildIncome(): {
       clients: IncomeClient[];
       totals: { paid: number[]; invoiced: number[]; projected: number[] };
@@ -859,7 +791,7 @@ export async function GET(request: NextRequest) {
     );
 
     // Runway uses every known future event, not just the visible columns.
-    // Beyond the final event, the same historical-average costs continue.
+    // Beyond finite events, reviewed schedules and variable costs repeat.
     const extraCommitted = new Map<string, number>();
     const extraOptimistic = new Map<string, number>();
     const addFuture = (map: Map<string, number>, m: string, value: number) => {
@@ -872,29 +804,25 @@ export async function GET(request: NextRequest) {
       }
       for (const [m, value] of c.projected) addFuture(extraOptimistic, m, round(value));
     }
-    let baselineNet = 0;
-    const costCodes = new Set([...actualOut.keys(), ...projectedOut.keys()]);
-    for (const code of costCodes) {
-      const managedVat = vatEnabled && vatAccountCodes.has(code);
-      if (excludedCosts.has(code) || (managedVat && excludedCosts.has("VAT_LIABILITY"))) continue;
-      const avg = managedVat ? 0 : round(avgMonths.reduce((sum, m) => sum + (actualOut.get(code)?.months.get(m) ?? 0), 0) / avgMonths.length);
-      baselineNet -= avg;
-      const bills = projectedOut.get(code)?.months;
-      const overrides = managedVat ? undefined : overrideLookup.get(code);
-      const eventMonths = new Set([...(bills?.keys() ?? []), ...(overrides?.keys() ?? [])]);
-      for (const m of eventMonths) {
-        const cost = round(bills?.get(m) ?? overrides?.get(m) ?? avg);
-        addFuture(extraCommitted, m, avg - cost);
-        addFuture(extraOptimistic, m, avg - cost);
-      }
+    // Use exactly the grid estimator for every future month. Once all finite
+    // schedules/bills/overrides have passed, costs repeat on a 12-month cycle.
+    const settledYear = Number(costForecast.lastChangeMonth.slice(0, 4)) + 1;
+    const baselineNetByCalendarMonth = Array.from({ length: 12 }, (_, i) => {
+      const month = `${settledYear}-${String(i + 1).padStart(2, '0')}`;
+      return -round(costCodes.reduce((total, code) => total + costForecast.estimate(code, month, costOptions(code)).amount, 0));
+    });
+    for (let month = addMonthKey(currentMonth, 1); month <= costForecast.lastChangeMonth; month = addMonthKey(month, 1)) {
+      const cost = round(costCodes.reduce((total, code) => total + costForecast.estimate(code, month, costOptions(code)).amount, 0));
+      const extra = -cost - baselineNetByCalendarMonth[Number(month.slice(5, 7)) - 1];
+      if (extra !== 0) { addFuture(extraCommitted, month, extra); addFuture(extraOptimistic, month, extra); }
     }
     for (const [m] of vatResult?.committedBillByMonth ?? []) {
       addFuture(extraCommitted, m, -vatCommittedBill(m));
       addFuture(extraOptimistic, m, -vatCommittedBill(m));
     }
     for (const [m] of vatResult?.optimisticExtraByMonth ?? []) addFuture(extraOptimistic, m, -vatOptimisticExtra(m));
-    const fallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: committedClosing[currentMonthIndex], baselineNet, extraNetByMonth: extraCommitted});
-    const optimisticFallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: optimisticClosing[currentMonthIndex], baselineNet, extraNetByMonth: extraOptimistic});
+    const fallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: committedClosing[currentMonthIndex], baselineNetByCalendarMonth, extraNetByMonth: extraCommitted});
+    const optimisticFallsBelowZeroMonth = zeroBalanceMonth({currentMonth, closingBalance: optimisticClosing[currentMonthIndex], baselineNetByCalendarMonth, extraNetByMonth: extraOptimistic});
     const relativeRunway = (m: string | null) => {
       if (!m) return null;
       const distance = monthsBetween(currentMonth, m);
@@ -933,6 +861,13 @@ export async function GET(request: NextRequest) {
       optimisticClosing,
       optimisticNet,
       accounts,
+      costForecast: {
+        ...costForecast.review,
+        managedAccountCodes: vatEnabled ? [...vatAccountCodes] : [],
+        streams: costForecast.review.streams?.filter(p => costCodes.includes(p.accountCode) && !(vatEnabled && vatAccountCodes.has(p.accountCode))),
+        suggestions: costForecast.review.suggestions.filter(r => !(vatEnabled && vatAccountCodes.has(r.accountCode))),
+        recentPayments: costForecast.review.recentPayments.filter(p => !(vatEnabled && vatAccountCodes.has(p.accountCode))),
+      },
       // VAT surfaces (present only when VAT is enabled).
       vatAdjustedClosing: vatResult ? vatAdjustedClosing : undefined,
       vatOwedNow: vatResult ? vatResult.vatOwedNow : undefined,
@@ -950,4 +885,17 @@ export async function GET(request: NextRequest) {
 
 function round(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// Twelve months can exceed the Data API's default row limit. Missing the
+// tail would understate both cash history and estimates, so page explicitly.
+async function readCashPages<T>(query: (start: number, end: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<{ data: T[] }> {
+  const data: T[] = [];
+  for (let start = 0; ; start += 1000) {
+    const result = await query(start, start + 999);
+    if (result.error) throw new Error('Could not load cash history');
+    const rows = result.data ?? [];
+    data.push(...rows);
+    if (rows.length < 1000) return { data };
+  }
 }

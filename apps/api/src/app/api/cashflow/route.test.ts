@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   projections: [] as Record<string, unknown>[],
   vatState: null as Record<string, unknown> | null,
   vatable: [] as Record<string, unknown>[],
+  costRules: [] as Record<string, unknown>[],
 }));
 
 // Identity helpers so GET returns the raw response object.
@@ -29,6 +30,7 @@ vi.mock("@/lib/supabase", () => {
     const filters: Record<string, unknown> = {};
     const builder: Record<string, unknown> = {
       select: () => builder,
+      range: (start: number, end: number) => { filters.rangeStart = start; filters.rangeEnd = end; return builder; },
       eq: (c: string, v: unknown) => ((filters[c] = v), builder),
       neq: (c: string, v: unknown) => ((filters[`neq_${c}`] = v), builder),
       gte: () => builder,
@@ -38,8 +40,11 @@ vi.mock("@/lib/supabase", () => {
       is: (c: string, v: unknown) => ((filters[`is_${c}`] = v), builder),
       order: () => builder,
       maybeSingle: () => Promise.resolve({ data: resolve(filters)[0] ?? null, error: null }),
-      then: (onF: (r: unknown) => unknown, onR?: (e: unknown) => unknown) =>
-        Promise.resolve({ data: resolve(filters), error: null }).then(onF, onR),
+      then: (onF: (r: unknown) => unknown, onR?: (e: unknown) => unknown) => {
+        const rows = resolve(filters);
+        const data = filters.rangeStart === undefined ? rows : rows.slice(Number(filters.rangeStart), Number(filters.rangeEnd) + 1);
+        return Promise.resolve({ data, error: null }).then(onF, onR);
+      },
     };
     return builder;
   }
@@ -48,6 +53,8 @@ vi.mock("@/lib/supabase", () => {
       from: (table: string) =>
         makeBuilder((filters) => {
           switch (table) {
+            case "cost_forecast_rules":
+              return state.costRules;
             case "xero_bank_transactions":
               return state.bankTxns;
             case "xero_invoices": {
@@ -84,6 +91,7 @@ vi.mock("@/lib/supabase", () => {
 });
 
 import { GET } from "./route";
+import { costStreamKey } from '@/lib/cost-forecast';
 
 // now = 15 June 2026 → with back=1, forward=2 the months are May/Jun/Jul, current = Jun (index 1).
 const req = { url: "http://localhost/api/cashflow?back=1&forward=2" } as Parameters<typeof GET>[0];
@@ -116,6 +124,7 @@ beforeEach(() => {
   state.projections = [];
   state.vatState = null;
   state.vatable = [];
+  state.costRules = [];
 });
 
 afterEach(() => vi.useRealTimers());
@@ -511,6 +520,67 @@ describe("income: projected layer and lapse", () => {
 // ---------------------------------------------------------------------------
 
 describe("costs: unchanged account model", () => {
+  it('keeps one-off decisions attached to Xero line IDs when imported lines reorder', async () => {
+    const lines = [
+      { LineItemID: 'laptop-line', AccountCode: '400', LineAmount: 3000, Description: 'Laptop' },
+      { LineItemID: 'monthly-line', AccountCode: '400', LineAmount: 300, Description: 'Subscription' },
+    ];
+    state.bankTxns = [{ xero_id: 'purchase', type: 'SPEND', total: 3300, date: '2026-05-10', status: 'AUTHORISED', line_items: lines }];
+    state.costRules = [{ rule: { type: 'one_off', transactionId: 'bank:purchase:laptop-line' } }];
+    const before = await run();
+    state.bankTxns[0].line_items = [...lines].reverse();
+    const after = await run();
+    expect(after.cashOut[0].monthly).toEqual([3300, 100, 100]);
+    expect(after.cashOut).toEqual(before.cashOut);
+  });
+  it('ends a schedule beyond the short chart before solving the continuing runway', async () => {
+    state.bankAccounts = [{ current_balance: 1000 }];
+    state.costRules = [{ rule: { type: 'recurring', rule: {
+      accountCode: '400', streamKey: 'manual:temporary', label: 'Temporary', amount: 300,
+      frequencyMonths: 1, startMonth: '2026-09', endMonth: '2026-11',
+    } } }];
+    const short = await run();
+    const long = await GET({ url: 'http://localhost/api/cashflow?back=1&forward=24' } as Parameters<typeof GET>[0]) as unknown as CashflowResponse;
+    expect(short.fallsBelowZeroMonth).toBeNull();
+    expect(long.fallsBelowZeroMonth).toBeNull();
+    expect(long.committedClosing.at(-1)).toBe(100);
+  });
+
+  it('reads beyond the default 1000-row API limit without losing cash history', async () => {
+    state.bankTxns = Array.from({ length: 1001 }, (_, i) => ({ xero_id: `p-${i}`, type: 'SPEND', total: 1, date: '2026-05-10', status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 1 }] }));
+    const result = await run();
+    expect(result.cashOut[0].monthly[0]).toBe(1001);
+    expect(result.costForecast?.recentPayments).toHaveLength(1001);
+  });
+  it('uses reviewed schedules in both visible balances and runway beyond the chart', async () => {
+    state.bankAccounts = [{ current_balance: 1000 }];
+    state.costRules = [{ rule: { type: 'recurring', rule: {
+      accountCode: '400', streamKey: 'manual:insurance', label: 'Insurance', amount: 600,
+      frequencyMonths: 12, startMonth: '2026-09', endMonth: null,
+    } } }];
+    const short = await run();
+    expect(short.committedClosing).toEqual([1000, 1000, 1000]);
+    expect(short.fallsBelowZeroMonth).toBe('2027-09');
+    const long = await GET({ url: 'http://localhost/api/cashflow?back=1&forward=24' } as Parameters<typeof GET>[0]) as unknown as CashflowResponse;
+    expect(long.committedClosing[long.months.indexOf('2026-09')]).toBe(400);
+    expect(long.committedClosing[long.months.indexOf('2027-09')]).toBe(-200);
+    expect(long.fallsBelowZeroMonth).toBe(short.fallsBelowZeroMonth);
+  });
+
+  it('matches a bill only to its supplier and honours saved one-offs without changing history', async () => {
+    state.bankTxns = ['03', '04', '05'].flatMap(month => [
+      { xero_id: `a-${month}`, contact_name: 'A', type: 'SPEND', total: 300, date: `2026-${month}-10`, status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 300, Description: 'Subscription' }] },
+      { xero_id: `b-${month}`, contact_name: 'B', type: 'SPEND', total: 200, date: `2026-${month}-10`, status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 200, Description: 'Subscription' }] },
+    ]);
+    state.bankTxns.push({ xero_id: 'laptop', contact_name: 'A', type: 'SPEND', total: 3000, date: '2026-05-20', status: 'AUTHORISED', line_items: [{ AccountCode: '400', LineAmount: 3000, Description: 'Subscription' }] });
+    state.costRules = [{ rule: { type: 'one_off', transactionId: 'bank:laptop:0' } }];
+    state.invoices = [{ xero_id: 'bill-a', contact_name: 'A', type: 'ACCPAY', status: 'AUTHORISED', total: 320, amount_due: 320, due_date: '2026-07-10', line_items: [{ AccountCode: '400', LineAmount: 320, Description: 'Subscription' }] }];
+    const result = await run();
+    expect(result.cashOut[0].monthly).toEqual([3500, 500, 520]);
+    expect(result.cashOut[0].breakdown?.[2]).toMatchObject({ bills: 320, variable: 200 });
+    expect(result.costForecast?.recentPayments.find(p => p.id === 'bank:laptop:0')?.streamKey).toBe(costStreamKey('400', 'A', 'Subscription'));
+    for (let i = 0; i < result.months.length; i++) expect(result.committedClosing[i] - result.committedOpening[i]).toBe(result.committedNet[i]);
+  });
   it("applies a manual override when there is no invoice for that future month", async () => {
     state.overrides = [{ account_code: "400", month: "2026-07", amount: 5000 }];
     const res = await run();
@@ -519,15 +589,15 @@ describe("costs: unchanged account model", () => {
     expect(acct.hasOverride[2]).toBe(true);
   });
 
-  it("lets a real bill win over a manual override by presence", async () => {
+  it("uses the manual month total while retaining known bills as its floor", async () => {
     state.overrides = [{ account_code: "400", month: "2026-07", amount: 5000 }];
     state.invoices = [
       { xero_id: "b1", type: "ACCPAY", total: 3000, amount_due: 3000, due_date: "2026-07-20", status: "AUTHORISED", line_items: [{ AccountCode: "400", LineAmount: 3000 }] },
     ];
     const res = await run();
     const acct = res.cashOut.find((a) => a.accountCode === "400")!;
-    expect(acct.monthly[2]).toBe(3000);
-    expect(acct.hasOverride[2]).toBe(false);
+    expect(acct.monthly[2]).toBe(5000);
+    expect(acct.hasOverride[2]).toBe(true);
   });
 
   it("projects only the remaining amount of a partially-paid bill, pro rata", async () => {

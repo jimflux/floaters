@@ -8,6 +8,7 @@ import { Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { setProjectionOverride, removeProjectionOverride, type ProjectionOverrideEntry } from '@/lib/api';
 import { cellTone } from '@/lib/brand';
+import type { CostBreakdown } from '@floaters/types';
 
 function formatGBP(n: number): string {
   const abs = Math.abs(Math.round(n));
@@ -31,10 +32,11 @@ interface EditableCellProps {
   // override or an open-then-save would silently ratchet it up.
   overrideAmount?: number;
   as?: 'td' | 'div';
+  breakdown?: CostBreakdown;
 }
 
 export default function EditableCell({
-  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, overrideAmount, as = 'td',
+  value, accountCode, month, isProjected, hasOverride, isCurrentMonth, isAltRow = false, previousValue, months, monthIndex, overrideAmount, as = 'td', breakdown,
 }: EditableCellProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -76,7 +78,8 @@ export default function EditableCell({
           const hasOverride = [...(a.hasOverride || a.monthly.map(() => false))];
           for (const { index, amount } of patches) {
             if (index >= 0 && index < monthly.length) {
-              monthly[index] = amount;
+              const known = a.breakdown?.[index];
+              monthly[index] = known ? Math.max(amount, known.actual + known.bills) : amount;
               hasOverride[index] = true;
             }
           }
@@ -135,7 +138,7 @@ export default function EditableCell({
     onSettled: settle,
   });
 
-  // Reset reverts to the server's auto-projection (3-month average / invoice-only),
+  // Reset reverts to the server's schedules, matched bills and variable estimate,
   // which we can't compute client-side, so the cell value just refetches on
   // settle. The raw override entry is removed optimistically, though, so a
   // reopened editor doesn't seed from the deleted override.
@@ -198,9 +201,18 @@ export default function EditableCell({
           {hasOverride && <Pencil className="h-2.5 w-2.5 shrink-0 opacity-60" />}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-3 space-y-2" align="end" sideOffset={4}>
-        <p className="text-xs text-muted-foreground font-semibold">Edit projection</p>
+      <PopoverContent className="w-[300px] max-w-[calc(100vw-32px)] p-3 space-y-2" align="end" sideOffset={4}>
+        {breakdown && <div className="space-y-1 border-b pb-2 text-xs">
+          {([
+            ['Cash already paid', breakdown.actual], ['Unpaid bills', breakdown.bills],
+            ['Remaining recurring costs', breakdown.recurring], ['Variable estimate', breakdown.variable],
+            ['Manual adjustment', breakdown.adjustment],
+          ] as const).map(([label, amount]) => <div key={label} className="flex justify-between gap-3"><span>{label}</span><span className="tabular-nums">{formatGBP(amount)}</span></div>)}
+          <p className="text-muted-foreground pt-1">{breakdown.method}</p>
+        </div>}
+        <p className="text-xs text-muted-foreground font-semibold">Expected month total</p>
         <Input
+          aria-label="Expected month total"
           ref={inputRef}
           type="number"
           value={inputValue}
@@ -208,6 +220,7 @@ export default function EditableCell({
           onKeyDown={handleKeyDown}
           className="h-9 text-sm tabular-nums"
         />
+        <p className="text-xs text-muted-foreground">Sets the category total. It cannot reduce cash already paid or unpaid bills.</p>
         {previousValue !== undefined && (
           <div className="space-y-1.5">
             <Button
