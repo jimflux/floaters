@@ -12,6 +12,7 @@ vi.mock('recharts', () => ({
   LineChart: ({ data, children }: { data: Record<string, unknown>[]; children: React.ReactNode }) => <><div data-testid={data?.[0]?.jisa !== undefined ? 'child-chart' : 'projection-chart'}>{JSON.stringify(data)}</div>{children}</>,
   YAxis: ({ domain, allowDataOverflow }: { domain: unknown[]; allowDataOverflow: boolean }) => <div data-testid="chart-axis" data-domain={JSON.stringify(domain)} data-clips={String(allowDataOverflow)} />,
   ReferenceLine: ({ x }: { x: number }) => <span data-testid="milestone-reference" data-age={x} />,
+  ReferenceArea: ({ x1, x2 }: { x1: number; x2: number }) => <span data-testid="funding-gap-band" data-from={x1} data-to={x2} />,
   Line: () => null, XAxis: () => null, CartesianGrid: () => null, Tooltip: () => null, Legend: () => null,
 }));
 import RetirementPage from './RetirementPage';
@@ -836,5 +837,42 @@ describe('RetirementPage', () => {
     expect(screen.getByLabelText('Spending 2 label')).toHaveValue('New spending');
     fireEvent.click(screen.getByRole('button', { name: 'Add one-off' }));
     expect(screen.getByLabelText('One-off 1 amount')).toHaveValue(0);
+  });
+});
+
+describe('main graph funding overlay', () => {
+  it('toggles accessible and locked funding, follows the selected case, and keeps the plan saved', async () => {
+    const plan = createExampleRetirementPlan(2036);
+    plan.partnerEnabled = false; plan.inflation = 0; delete plan.longevityAge;
+    plan.people[0].age = 51; plan.people[0].retirementAge = 51; plan.people[0].pensionAccessAge = 57;
+    plan.endAge = 68;
+    for (const asset of Object.values(plan.people[0].assets)) {
+      asset.balance = 0; asset.annualContribution = 0; asset.returns = { cautious: 0, base: 0, optimistic: 0.02 };
+    }
+    plan.people[0].assets.isa.balance = 50000; plan.people[0].assets.pension.balance = 500000;
+    plan.income = [{ id: 'state', label: 'State Pension', kind: 'state-pension', person: 0, startAge: 68, endAge: 120, annualAmount: 12000, taxable: true }];
+    plan.spending = [{ id: 'living', label: 'Living', startAge: 51, endAge: 100, annualAmount: 10000 }];
+    mocks.get.mockResolvedValue({ plan, savedAt: null });
+    render(<RetirementPage />);
+    const toggle = await screen.findByRole('button', { name: 'Funding overlay' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('funding-gap-band')).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    const rows = JSON.parse(screen.getByTestId('projection-chart').textContent!);
+    expect(rows.find((row: { age: number }) => row.age === 56).funding).toMatchObject({ year: 2041, accessibleAssets: 0, totalAssets: 500000, spendingShortfall: 10000 });
+    expect(screen.getByTestId('funding-gap-band')).toHaveAttribute('data-from', '55.5');
+    expect(screen.getByText(/Funding overlay.*Base/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Detail case'), { target: { value: 'optimistic' } });
+    const optimistic = JSON.parse(screen.getByTestId('projection-chart').textContent!);
+    expect(optimistic.find((row: { age: number }) => row.age === 56).funding.totalAssets).toBeGreaterThan(500000);
+    expect(screen.getByText(/Funding overlay.*Optimistic/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Stress test'), { target: { value: 'market-drop' } });
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0].funding.totalAssets).toBeLessThan(optimistic[0].funding.totalAssets);
+    fireEvent.click(toggle);
+    expect(JSON.parse(screen.getByTestId('projection-chart').textContent!)[0]).not.toHaveProperty('funding');
+    expect(screen.queryByTestId('funding-gap-band')).not.toBeInTheDocument();
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(mocks.save).not.toHaveBeenCalled();
   });
 });

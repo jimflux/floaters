@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   RETIREMENT_ASSETS, RETIREMENT_CASES, retirementPlanErrors,
   type RetirementAmountBasis, type RetirementCase, type RetirementPlan, type RetirementProjection,
@@ -72,6 +72,7 @@ export default function RetirementPage({ active = true, navigation }: { active?:
   const [warnings, setWarnings] = useState<string[]>([]);
   const [stress, setStress] = useState<RetirementStress>('none');
   const [fullChartRange, setFullChartRange] = useState(false);
+  const [fundingOverlay, setFundingOverlay] = useState(false);
   const [chartWidth, setChartWidth] = useState(800);
   const [milestoneYear, setMilestoneYear] = useState<number | null>(null);
   const effectiveStress = !plan?.partnerEnabled && (stress === 'lose-you' || stress === 'lose-partner') ? 'none' : stress;
@@ -139,7 +140,8 @@ export default function RetirementPage({ active = true, navigation }: { active?:
   }, [projectionPlan, errors, pension.source, pension.error, effectiveStress]);
   const chartData = useMemo(() => projections?.base.years.flatMap((row, index, years) =>
     row.year >= currentYear || years[years.length - 1].year < currentYear ? [{ age: row.age,
-      cautious: projections.cautious.years[index].totalAssets, base: row.totalAssets, optimistic: projections.optimistic.years[index].totalAssets }] : []), [projections, currentYear]);
+      cautious: projections.cautious.years[index].totalAssets, base: row.totalAssets, optimistic: projections.optimistic.years[index].totalAssets,
+      ...(fundingOverlay ? { funding: { ...projections[detailCase].years[index], lockedPension: Math.max(0, projections[detailCase].years[index].totalAssets - projections[detailCase].years[index].accessibleAssets) } } : {}) }] : []), [projections, currentYear, fundingOverlay, detailCase]);
   const chartCeiling = Math.max(1000, ...((chartData ?? []).map(row => row.base * 1.5)));
   const chartExceedsFocus = chartData?.some(row => RETIREMENT_CASES.some(scenario => row[scenario] > chartCeiling));
   const chartFocused = !!chartExceedsFocus && !fullChartRange;
@@ -275,13 +277,27 @@ export default function RetirementPage({ active = true, navigation }: { active?:
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Year-end assets at retirement · age {projectionPlan!.people[0].retirementAge}</p><p className="mt-2 text-lg font-bold">{detail.assetsAtRetirement === null ? 'Outside projection range' : money(detail.assetsAtRetirement)}</p></div>
             <div className="rounded-tile bg-cloud p-4"><p className="text-xs font-semibold text-muted-foreground">Accessible assets in {selected.year} · age {selected.age}</p><p className="mt-2 text-lg font-bold">{money(selected.accessibleAssets)}</p><p className="text-xs text-muted-foreground">Excludes pensions before each person’s access age.</p></div>
           </div>
-          <RetirementFunding plan={projectionPlan!} projection={detail} caseLabel={CASE_LABEL[detailCase]} stress={effectiveStress} selectedYear={selected.year} onYear={setSelectedYear} />
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button variant={fundingOverlay ? 'secondary' : 'outline'} aria-label="Funding overlay" aria-pressed={fundingOverlay} onClick={() => setFundingOverlay(value => !value)}>{fundingOverlay ? 'Hide funding overlay' : 'Show funding overlay'}</Button>
+            {fundingOverlay && <p id="funding-overlay-note" className="max-w-3xl text-xs text-muted-foreground">Funding overlay · {CASE_LABEL[detailCase]}. Green shows accessible money; gold shows locked pensions. Red shaded years have unfunded spending and tax. Hover for monthly draw needed and the annual gap. Numbered milestones show pension access and income start dates.</p>}
+          </div>
           {chartExceedsFocus && <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p id="chart-scale-note" className="text-xs text-muted-foreground">{chartFocused ? `Scale capped at ${money(chartCeiling)} to keep the base forecast readable. Lines continue above the chart; hover or use Annual breakdown for full values.` : 'Full range shown, including the optimistic forecast’s highest values.'}</p>
             <Button variant="outline" className="h-8 px-3" aria-pressed={fullChartRange} onClick={() => setFullChartRange(value => !value)}>{fullChartRange ? 'Focus on base' : 'Show full range'}</Button>
           </div>}
-          <div className="mt-3 h-[calc(260px+var(--milestone-space))] w-full min-w-0 sm:h-[calc(300px+var(--milestone-space))]" style={{ '--milestone-space': `${markerSpace}px` } as CSSProperties} role="group" aria-label="Cautious, base and optimistic projected household assets by your age" aria-describedby={chartExceedsFocus ? 'chart-scale-note' : undefined}>
-            <ResponsiveContainer width="100%" height="100%" onResize={width => setChartWidth(width)}><LineChart data={chartData} margin={{ top: 10 + markerSpace, right: 10, left: 5, bottom: 10 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="age" tickLine={false} /><YAxis width={72} domain={chartFocused ? [0, chartCeiling] : [0, 'auto']} allowDataOverflow={chartFocused} tickFormatter={value => `£${Math.round(Number(value) / 1000)}k`} tickLine={false} /><Tooltip formatter={(value: unknown) => money(Number(value))} labelFormatter={value => `Age ${value}`} /><Legend formatter={value => <span className="text-foreground">{value}</span>} />{RETIREMENT_CASES.map(scenario => <Line key={scenario} type="monotone" dataKey={scenario} name={CASE_LABEL[scenario]} stroke={CASE_COLOR[scenario]} strokeWidth={2} strokeDasharray={scenario === 'cautious' ? '5 4' : scenario === 'optimistic' ? '2 4' : undefined} dot={false} isAnimationActive={false} />)}{placedMilestones.map((group, index) => <ReferenceLine key={group.year} x={group.age} stroke={CASE_COLOR.base} strokeOpacity={group.year === milestoneYear ? 0.65 : 0.2} strokeDasharray="2 4" label={<RetirementMilestoneMarker group={group} number={index + 1} lane={group.lane} active={group.year === milestoneYear} onSelect={() => setMilestoneYear(group.year)} />} />)}</LineChart></ResponsiveContainer>
+          <div className="mt-3 h-[calc(260px+var(--milestone-space))] w-full min-w-0 sm:h-[calc(300px+var(--milestone-space))]" style={{ '--milestone-space': `${markerSpace}px` } as CSSProperties} role="group" aria-label="Cautious, base and optimistic projected household assets by your age" aria-describedby={[chartExceedsFocus ? 'chart-scale-note' : '', fundingOverlay ? 'funding-overlay-note' : ''].filter(Boolean).join(' ') || undefined}>
+            <ResponsiveContainer width="100%" height="100%" onResize={width => setChartWidth(width)}><LineChart data={chartData} margin={{ top: 10 + markerSpace, right: 10, left: 5, bottom: 10 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="age" type={fundingOverlay ? 'number' : 'category'} domain={fundingOverlay ? ['dataMin', 'dataMax'] : undefined} tickLine={false} /><YAxis width={72} domain={chartFocused ? [0, chartCeiling] : [0, 'auto']} allowDataOverflow={chartFocused} tickFormatter={value => `£${Math.round(Number(value) / 1000)}k`} tickLine={false} /><Tooltip formatter={(value: unknown) => money(Number(value))} labelFormatter={value => `Age ${value}`} content={fundingOverlay ? ({ active, payload }) => {
+              const point = payload?.[0]?.payload as NonNullable<typeof chartData>[number] | undefined;
+              if (!active || !point?.funding) return null;
+              const row = point.funding;
+              return <div className="max-w-72 rounded-lg border border-border bg-card p-3 text-xs shadow-md">
+                <p className="font-semibold">{row.year} · age {row.age} · {CASE_LABEL[detailCase]}</p>
+                <p className="mt-1">Total assets: {money(row.totalAssets)}</p><p>Accessible: {money(row.accessibleAssets)}</p><p>Locked pension: {money(row.lockedPension)}</p>
+                <p className="mt-1">Draw needed: {money((row.withdrawals + row.spendingShortfall) / (12 * row.yearFraction))}/month</p>
+                <p className={row.spendingShortfall > 0 ? 'font-semibold text-destructive' : ''}>Unfunded spending &amp; tax: {money(row.spendingShortfall)}/year</p>
+              </div>;
+            } : undefined} /><Legend formatter={value => <span className="text-foreground">{value}</span>} />
+            {fundingOverlay && chartData?.filter(point => point.funding && point.funding.spendingShortfall > 0).map(point => <ReferenceArea key={`gap-${point.age}`} x1={point.age - 0.5} x2={point.age + 0.5} fill="hsl(var(--destructive))" fillOpacity={0.15} strokeOpacity={0} ifOverflow="hidden" />)}{RETIREMENT_CASES.map(scenario => <Line key={scenario} type="monotone" dataKey={scenario} name={CASE_LABEL[scenario]} stroke={CASE_COLOR[scenario]} strokeOpacity={fundingOverlay && scenario !== detailCase ? 0.25 : 1} strokeWidth={2} strokeDasharray={scenario === 'cautious' ? '5 4' : scenario === 'optimistic' ? '2 4' : undefined} dot={false} isAnimationActive={false} />)}{fundingOverlay && <Line type="monotone" dataKey="funding.accessibleAssets" name={`Accessible · ${CASE_LABEL[detailCase]}`} stroke="hsl(158 36% 35%)" strokeWidth={3} dot={false} isAnimationActive={false} />}{fundingOverlay && <Line type="monotone" dataKey="funding.lockedPension" name={`Locked pension · ${CASE_LABEL[detailCase]}`} stroke="hsl(var(--sun))" strokeWidth={2} strokeDasharray="7 3" dot={false} isAnimationActive={false} />}{placedMilestones.map((group, index) => <ReferenceLine key={group.year} x={group.age} stroke={CASE_COLOR.base} strokeOpacity={group.year === milestoneYear ? 0.65 : 0.2} strokeDasharray="2 4" label={<RetirementMilestoneMarker group={group} number={index + 1} lane={group.lane} active={group.year === milestoneYear} onSelect={() => setMilestoneYear(group.year)} />} />)}</LineChart></ResponsiveContainer>
           </div>
           {!!milestones.length && <section aria-label="Chart milestones" className="mt-2 border-t border-border pt-2">
             <div className="flex gap-2 overflow-x-auto pb-1">{milestones.map((group, index) => <button key={group.year} type="button" aria-label={`Milestones in ${group.year}`} aria-pressed={group.year === milestoneYear} onMouseEnter={() => setMilestoneYear(group.year)} onFocus={() => setMilestoneYear(group.year)} onClick={() => setMilestoneYear(group.year)} className={`flex shrink-0 items-center gap-2 rounded-md border px-2 py-1 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-iris ${group.year === milestoneYear ? 'border-iris bg-iris/10' : 'border-border'}`}>
@@ -289,6 +305,7 @@ export default function RetirementPage({ active = true, navigation }: { active?:
             </button>)}</div>
             {activeMilestone ? <div className="mt-2 rounded-md bg-iris/5 p-2 text-xs" aria-live="polite"><p className="font-semibold">{activeMilestone.year} · your age {activeMilestone.age}</p><ul className="mt-1 space-y-1">{activeMilestone.events.map(event => <li key={event.id}><strong>{event.label}</strong> — {event.detail}</li>)}</ul></div> : <p className="mt-1 text-xs text-muted-foreground">Hover or select a numbered milestone for details. Years follow the annual projection.</p>}
           </section>}
+          <RetirementFunding plan={projectionPlan!} projection={detail} caseLabel={CASE_LABEL[detailCase]} stress={effectiveStress} selectedYear={selected.year} onYear={setSelectedYear} />
           <details className="mt-3 border-t border-border pt-4" open={annualDetailOpen}><summary className="cursor-pointer font-semibold" onClick={event => { event.preventDefault(); setAnnualDetailOpen(open => !open); }}>Annual breakdown</summary>
           {annualDetailOpen && <>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-3"><h3 className="font-display text-lg font-bold">Annual detail · {CASE_LABEL[detailCase]}</h3><label className="text-xs font-semibold text-muted-foreground">Selected year<select aria-label="Selected year" className={`${INPUT} mt-1`} value={selected.year} onChange={event => setSelectedYear(Number(event.target.value))}>{detail.years.map(row => <option key={row.year} value={row.year}>{row.year} · age {row.age}</option>)}</select></label></div>
