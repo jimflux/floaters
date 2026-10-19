@@ -53,4 +53,12 @@ export interface CostForecastReview {
   recentPayments: CostPayment[];
   streams?: { streamKey: string; accountCode: string; label: string }[];
   managedAccountCodes?: string[];
+  accountForecasts?: {
+    accountCode: string;
+    history: { month: string; amount: number }[];
+    nextMonth: string;
+    nextMonthAmount: number;
+    method: string;
+    backtestError: number | null;
+  }[];
 }

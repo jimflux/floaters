@@ -15,7 +15,7 @@ interface Props {
   accounts: CashflowAccountInfo[];
   currentMonth: string;
 }
-type Draft = { rule: CostRule; kind: 'suggestion' | 'existing' | 'additional' };
+type Draft = { rule: CostRule; kind: 'existing' | 'additional' };
 const money = (amount: number) => amount.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
 const frequency = (rule: CostRule) => rule.endMonth === rule.startMonth ? 'Once' : ({ 1: 'Monthly', 3: 'Quarterly', 12: 'Annually' }[rule.frequencyMonths]);
 
@@ -43,27 +43,25 @@ export default function CostForecastPanel({ open, onOpenChange, forecast, accoun
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:w-[480px] sm:max-w-[480px] p-0 flex flex-col">
         <SheetHeader className="px-6 pt-6 pb-3 pr-16">
-          <SheetTitle>Cost forecasts</SheetTitle>
-          <SheetDescription>Review recurring payments, exclude one-offs from estimates and plan additional costs. Amounts are future cash, including VAT.</SheetDescription>
+          <SheetTitle>Account forecasts</SheetTitle>
+          <SheetDescription>Automatic forecasts from the last 3–6 complete months of spending in each account. Edit a future month in the cashflow grid when you want to set its total. Amounts include VAT.</SheetDescription>
         </SheetHeader>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-6">
           {!forecast ? <p className="text-sm text-muted-foreground">Cost forecast details are unavailable. Refresh cashflow to load them.</p> : <>
+            <section aria-label="Automatic account forecasts" className="space-y-3">
+              <h3 className="font-semibold text-sm">Automatic account forecasts</h3>
+              <p className="text-xs text-muted-foreground">Each account learns its recent spending level and trend. Methods are checked against past months and change only when they clearly improve the forecast. Known bills, saved adjustments and your month totals are included.</p>
+              {(forecast.accountForecasts ?? []).filter(row => costAccounts.some(a => a.code === row.accountCode)).map(row => <div key={row.accountCode} className="rounded-lg border bg-card p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold break-words min-w-0">{costAccounts.find(a => a.code === row.accountCode)?.name}</p><div className="shrink-0 text-right"><p className="text-sm font-semibold tabular-nums">{money(row.nextMonthAmount)}</p><p className="text-xs text-muted-foreground">{row.nextMonth}</p></div></div>
+                <p className="text-xs text-muted-foreground">{row.method}</p>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="Recent actual spending">{row.history.map(point => <div key={point.month} className="min-w-0 text-xs"><p className="text-muted-foreground">{point.month}</p><p className="tabular-nums break-all">{money(point.amount)}</p></div>)}</div>
+              </div>)}
+              {!forecast.accountForecasts?.length && <p className="text-sm text-muted-foreground">Account forecasts will appear after cashflow refreshes.</p>}
+              <p className="text-xs text-muted-foreground">Forecasts refresh as new months complete. Trend changes taper over six months; six months of history cannot reliably predict annual expenses.</p>
+            </section>
+            <details className="border-t pt-3 space-y-4"><summary className="cursor-pointer text-sm font-semibold">Manual adjustments (optional)</summary>
             {(save.isError || remove.isError) && <p role="alert" className="text-sm text-destructive">Could not save your changes. Your draft is still here; please retry.</p>}
             {draft ? <RuleEditor key={draft.rule.streamKey} draft={draft} forecast={forecast} accounts={costAccounts} pending={pending} onSave={rule => saveChange({ type: 'recurring', rule })} onCancel={() => { setDraft(null); save.reset(); }} /> : <Button variant="outline" disabled={pending || costAccounts.length === 0} onClick={() => edit({ kind: 'additional', rule: { accountCode: costAccounts[0].code, streamKey: `manual:${crypto.randomUUID()}`, label: '', amount: 0, frequencyMonths: 1, startMonth: currentMonth, endMonth: null } })}>Additional planned cost</Button>}
-            <section aria-label="Recurring suggestions" className="space-y-2">
-              <h3 className="font-semibold text-sm">Suggestions to review</h3>
-              <p className="text-xs text-muted-foreground">Suggestions are not scheduled until you confirm them. Their past payments can still contribute to the variable estimate. Choose “No longer happening” to stop estimating a cancelled cost. When descriptions change, review and match them to the same schedule.</p>
-              {forecast.suggestions.length === 0 && <p className="text-sm text-muted-foreground">No recurring suggestions yet.</p>}
-              {forecast.suggestions.map(rule => <div key={rule.streamKey} className="rounded-lg bg-card border p-3 space-y-2">
-                <p className="text-sm font-semibold break-words">{rule.label}</p>
-                <p className="text-xs">{money(rule.amount)} · {frequency(rule)} · {rule.evidenceCount} payments</p>
-                <p className="text-xs text-muted-foreground">{rule.reason}</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" disabled={pending} aria-label={`Review ${rule.label}`} onClick={() => edit({ kind: 'suggestion', rule })}>Review</Button>
-                  <Button size="sm" variant="ghost" disabled={pending} aria-label={`No longer happening: ${rule.label}`} onClick={() => { if (draft?.rule.streamKey === rule.streamKey) setDraft(null); saveChange({ type: 'dismissed', stream: { accountCode: rule.accountCode, streamKey: rule.streamKey, label: rule.label } }); }}>No longer happening</Button>
-                </div>
-              </div>)}
-            </section>
             {!!forecast.settings.dismissedStreams?.length && <section aria-label="Dismissed suggestions" className="space-y-2">
               <h3 className="font-semibold text-sm">Dismissed suggestions</h3>
               <p className="text-xs text-muted-foreground">Excluded from automatic estimates. Actual payments, existing bills, confirmed schedules and manual month totals still count.</p>
@@ -84,22 +82,14 @@ export default function CostForecastPanel({ open, onOpenChange, forecast, accoun
                 </div>
               </div>)}
             </section>
-            <section aria-label="Recent payments" className="space-y-2">
-              <h3 className="font-semibold text-sm">Recent payments</h3>
-              <p className="text-xs text-muted-foreground">Marking a one-off keeps the payment in your actual cash history and excludes it from future estimates. Confirmed schedules are managed above.</p>
-              {forecast.recentPayments.length === 0 && <p className="text-sm text-muted-foreground">No recent payments.</p>}
-              {forecast.recentPayments.map(payment => {
-                const oneOff = forecast.settings.oneOffIds.includes(payment.id);
-                return <div key={payment.id} className="rounded-lg border bg-card p-3 space-y-2">
-                  <p className="text-sm font-semibold break-words">{payment.label}</p>
-                  <p className="text-xs"><span>{payment.date}</span> · {money(payment.amount)}{oneOff ? ' · One-off' : ''}</p>
-                  <Button size="sm" variant="outline" disabled={pending} aria-label={oneOff ? `Undo one-off for ${payment.label}` : `Mark ${payment.label} as one-off`} onClick={() => {
-                    if (oneOff) { save.reset(); remove.mutate({ type: 'one_off', transactionId: payment.id }); }
-                    else saveChange({ type: 'one_off', transactionId: payment.id });
-                  }}>{oneOff ? 'Undo one-off' : 'Mark as one-off'}</Button>
-                </div>;
-              })}
-            </section>
+            {forecast.recentPayments.some(payment => forecast.settings.oneOffIds.includes(payment.id)) && <section aria-label="Saved one-offs" className="space-y-2">
+              <h3 className="font-semibold text-sm">Saved one-off exclusions</h3>
+              {forecast.recentPayments.filter(payment => forecast.settings.oneOffIds.includes(payment.id)).map(payment => <div key={payment.id} className="rounded-lg border bg-card p-3 space-y-2">
+                <p className="text-sm font-semibold break-words">{payment.label}</p>
+                <Button size="sm" variant="outline" disabled={pending} aria-label={`Undo one-off for ${payment.label}`} onClick={() => { save.reset(); remove.mutate({ type: 'one_off', transactionId: payment.id }); }}>Undo one-off</Button>
+              </div>)}
+            </section>}
+            </details>
           </>}
         </div>
       </SheetContent>
@@ -144,6 +134,6 @@ function RuleEditor({ draft, forecast, accounts, pending, onSave, onCancel }: { 
         <input type="checkbox" checked disabled={pending} onChange={() => setMatches(previous => previous.filter(value => value !== key))} />Previously matched payment (outside current history)
       </label>)}
     </fieldset>}
-    <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={!valid || pending}>{draft.kind === 'suggestion' ? 'Confirm recurring cost' : draft.kind === 'additional' ? 'Save planned cost' : 'Save schedule'}</Button><Button size="sm" type="button" variant="ghost" disabled={pending} onClick={onCancel}>Cancel</Button></div>
+    <div className="flex flex-wrap gap-2"><Button size="sm" type="submit" disabled={!valid || pending}>{draft.kind === 'additional' ? 'Save planned cost' : 'Save schedule'}</Button><Button size="sm" type="button" variant="ghost" disabled={pending} onClick={onCancel}>Cancel</Button></div>
   </form>;
 }

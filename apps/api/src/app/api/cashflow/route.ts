@@ -864,6 +864,10 @@ export async function GET(request: NextRequest) {
       costForecast: {
         ...costForecast.review,
         managedAccountCodes: vatEnabled ? [...vatAccountCodes] : [],
+        accountForecasts: costForecast.review.accountForecasts?.filter(r => costCodes.includes(r.accountCode) && !(vatEnabled && vatAccountCodes.has(r.accountCode))).map(r => {
+          const estimate = costForecast.estimate(r.accountCode, r.nextMonth, costOptions(r.accountCode));
+          return { ...r, nextMonthAmount: estimate.amount, method: estimate.breakdown.method };
+        }),
         streams: costForecast.review.streams?.filter(p => costCodes.includes(p.accountCode) && !(vatEnabled && vatAccountCodes.has(p.accountCode))),
         suggestions: costForecast.review.suggestions.filter(r => !(vatEnabled && vatAccountCodes.has(r.accountCode))),
         recentPayments: costForecast.review.recentPayments.filter(p => !(vatEnabled && vatAccountCodes.has(p.accountCode))),
