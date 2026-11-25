@@ -77,9 +77,9 @@ React Query for data; the cashflow query is `['cashflow']`, hours are `['time']`
 
 ## MCP (`packages/mcp-tools`, `apps/mcp`, `/mcp/<secret>`)
 
-Shared tool definitions live in `packages/mcp-tools`. Eight read tools cover cashflow, pipeline, balances, forecast, transactions, time and saved forecast controls. Nine optional write tools edit income projections, cost overrides/schedules/classifications, row visibility and local invoice date/review/assignment. They use the authenticated API and never write Xero, sync data or expose arbitrary HTTP/SQL. `get_cashflow` accepts temporary `excludeCost` / `excludeClient` arrays; hidden cost rows still count in totals.
+Shared tool definitions live in `packages/mcp-tools`. Eight read tools cover cashflow, pipeline, balances, forecast, transactions, time and saved forecast controls. Nine write tools edit income projections, cost overrides/schedules/classifications, row visibility and local invoice date/review/assignment. They use the authenticated API and never write Xero, sync data or expose arbitrary HTTP/SQL. `get_cashflow` accepts temporary `excludeCost` / `excludeClient` arrays; hidden cost rows still count in totals.
 - `apps/mcp`: stdio for local clients. `FLOATERS_API_URL` + `FLOATERS_API_KEY`; writes require the explicit `FLOATERS_MCP_ALLOW_WRITES=true` opt-in.
-- `apps/api/src/app/mcp/[secret]/route.ts`: stateless remote Streamable HTTP. `MCP_SECRET` keeps the original read-only scope. A separate `MCP_WRITE_SECRET` enables both reads and forecast writes at `/mcp/<MCP_WRITE_SECRET>`. Each secret must be independently generated and at least 16 characters; matching read/write secrets cannot upgrade a read URL. Both loop back through the existing API with `CONNECT_SECRET`.
+- `apps/api/src/app/mcp/[secret]/route.ts`: stateless remote Streamable HTTP. The existing `/mcp/<MCP_SECRET>` connection exposes all 17 read and forecast-write tools. `MCP_WRITE_SECRET` remains an optional compatibility alias for previously issued URLs, with the same tools. Secrets require at least 16 characters. All calls loop back through the existing API with `CONNECT_SECRET`. Clients must refresh cached tool metadata after changes.
 - `packages/mcp-tools/src/client.ts` is the shared authenticated HTTP client. Inputs are validated before calls; mutations are explicitly annotated for clients. Tool errors preserve API failures, and cost override / visibility writes verify read-back. Database read/delete errors in forecast control routes must not be swallowed.
 See `apps/mcp/README.md` for both setups.
 
@@ -89,6 +89,6 @@ API → Railway (always-on; `railway.json` at the root). See `docs/DEPLOY-RAILWA
 
 ## Environment Variables
 
-API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FLUX_LOGIN_SECRET` (enables login.flux.am sign-in), `BURNBAR_URL` / `BURNBAR_READ_TOKEN` (optional; enable hours from BurnBar), `MCP_SECRET` (optional read-only MCP) and `MCP_WRITE_SECRET` (optional independent forecast-write MCP).
+API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FLUX_LOGIN_SECRET` (enables login.flux.am sign-in), `BURNBAR_URL` / `BURNBAR_READ_TOKEN` (optional; enable hours from BurnBar), `MCP_SECRET` (remote read/write MCP) and `MCP_WRITE_SECRET` (optional legacy URL alias).
 Web (dev only, `apps/web/.env`): `FLOATERS_DEV_API_URL`, `FLOATERS_DEV_API_KEY`. The production web build takes no variables.
 MCP: `FLOATERS_API_URL`, `FLOATERS_API_KEY`, optional `FLOATERS_MCP_ALLOW_WRITES=true`.

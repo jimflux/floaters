@@ -2,9 +2,10 @@
 
 An [MCP](https://modelcontextprotocol.io) surface over Floaters, shared by
 Claude, ChatGPT/Dot and local MCP clients. Read tools use the same cashflow,
-forecast and time computations as the web app. Optional write tools use the
+forecast and time computations as the web app. Forecast write tools use the
 existing authenticated API and its validation; they change Floaters forecasts,
-not Xero accounting records. Existing connections remain read-only by default.
+not Xero accounting records. Remote connections expose all 17 read and write tools
+through the same existing URL. Local stdio clients can opt into writes.
 Two ways to reach them:
 
 - **Remote (claude.ai, Claude desktop, any Streamable HTTP client)**: the API
@@ -26,7 +27,7 @@ Two ways to reach them:
 | `list_time_entries` | Individual BurnBar entries over a date range (default last 7 days, max 92), newest first. Params: `from`, `to`. |
 | `get_forecast_settings` | Saved projections, raw account/month cost overrides, hidden cost accounts and saved cost schedules/classifications. Read before changing forecasts. |
 
-### Write tools (separate write connection)
+### Write tools
 
 | Tool | Change |
 |---|---|
@@ -41,26 +42,26 @@ Two ways to reach them:
 | `remove_cost_forecast_rule` | Remove a saved cost schedule/classification and restore automatic estimation. |
 
 Each tool has explicit read/write, destructive and idempotency annotations for
-clients. These are hints, not access control: the server enforces read-only vs
-write access through distinct credentials. Read settings/pipeline before editing.
+clients. These are hints, not access control: the private endpoint credential
+authenticates access to all 17 tools. Read settings/pipeline before editing.
 Creation is not idempotent; inspect the pipeline before retrying an uncertain
 create response. There are no arbitrary HTTP, SQL, sync or connection-management
 tools. Retirement balances and assumptions are not currently exposed by MCP.
 
 ## Remote setup: Claude, ChatGPT and Dot
 
-The API exposes tools as stateless Streamable HTTP MCP endpoints:
+The API exposes all read and forecast-write tools on the same stateless
+Streamable HTTP endpoint:
 
-- Read-only: `https://floaters.flux.am/mcp/<MCP_SECRET>`.
-- Read and write: `https://floaters.flux.am/mcp/<MCP_WRITE_SECRET>`.
+```
+https://floaters.flux.am/mcp/<MCP_SECRET>
+```
 
-`MCP_WRITE_SECRET` is optional and must be at least 16 characters and different
-from `MCP_SECRET` and `CONNECT_SECRET`. Generate it independently with
-`openssl rand -hex 24` and set it on the Railway API service. Existing read URLs
-do not gain write access. Unset, short or colliding write secrets cannot enable
-writes. Rotate a scope's secret to revoke its existing URLs.
-
-Each private URL carries its scope’s access credential. No separate login is required.
+Keep using the existing URL. `MCP_SECRET` must be a random value of at least 16
+characters, independent of `CONNECT_SECRET`. After tool changes, refresh the
+connection's tool list so clients discover the write operations. The previously
+issued `MCP_WRITE_SECRET` URL remains a compatibility alias with the same tools;
+new connections do not need a separate write endpoint.
 
 In Claude: Customise → Connectors → Add → **Add custom connector**, name it
 `Floaters`, and paste the URL:
@@ -69,7 +70,7 @@ In Claude: Customise → Connectors → Add → **Add custom connector**, name i
 https://floaters.flux.am/mcp/<MCP_SECRET>
 ```
 
-For write access use the write URL above. In ChatGPT, add it through
+In ChatGPT, add the same URL through
 Plugins → + → Add custom MCP server, subject to account/workspace permissions.
 Use the resulting enabled plugin for Dot. Choose No authentication because the
 private URL itself carries access. Rescan/reconnect after changing the tool list.

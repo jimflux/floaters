@@ -61,12 +61,12 @@ describe("/mcp/[secret]", () => {
     expect(body.result.capabilities.tools).toBeDefined();
   });
 
-  it("lists the read-only tools as the stdio server", async () => {
+  it("lists read and write tools on the original endpoint", async () => {
     const res = await POST(...rpc(SECRET, { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }));
     expect(res.status).toBe(200);
     const body = await res.json();
     const names = body.result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual([...TOOL_NAMES].sort());
+    expect(names).toEqual([...TOOL_NAMES, ...WRITE_TOOL_NAMES].sort());
   });
 
   it("rejects the SSE stream GET in stateless mode rather than hanging", async () => {
@@ -80,17 +80,21 @@ describe("/mcp/[secret]", () => {
   };
   const uuid = '12345678-1234-4234-8234-123456789abc';
 
-  it('never discovers or executes writes through the existing read-only URL', async () => {
-    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-    const response = await POST(...rpc(SECRET, { jsonrpc: '2.0', id: 1, method: 'tools/list' }));
-    const listed = await response.json();
-    expect(listed.result.tools.every((tool: { annotations: { readOnlyHint: boolean } }) => tool.annotations.readOnlyHint)).toBe(true);
+  it('executes a write through the original URL with no separate write credential', async () => {
+    delete process.env.MCP_WRITE_SECRET;
+    const fetchMock = vi.fn(async (_url: URL, _init: RequestInit) => Response.json({ id: uuid, clientLabel: 'Example', amount: 100 }));
+    vi.stubGlobal('fetch', fetchMock);
     const result = await call(SECRET, 'create_income_projection', { clientLabel: 'Example', amount: 100, expectedMonth: '2030-01' });
-    expect(result.result.isError).toBe(true);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.result.isError).not.toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0].pathname).toBe('/api/projections');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+    const rejected = await POST(...rpc('wrong-secret-with-enough-length', { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'create_income_projection', arguments: { clientLabel: 'Example', amount: 100, expectedMonth: '2030-01' } } }));
+    expect(rejected.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('lists write tools only for the separate write secret, with accurate operation hints', async () => {
+  it('keeps the previously issued write URL working with the same tools and operation hints', async () => {
     const res = await POST(...rpc(WRITE_SECRET, { jsonrpc: '2.0', id: 1, method: 'tools/list' }));
     const listed = (await res.json()).result.tools;
     expect(listed.map((tool: { name: string }) => tool.name).sort()).toEqual([...TOOL_NAMES, ...WRITE_TOOL_NAMES].sort());
@@ -100,7 +104,7 @@ describe("/mcp/[secret]", () => {
     expect((await POST(...rpc(WRITE_SECRET, initialize))).status).toBe(404);
     process.env.MCP_WRITE_SECRET = SECRET;
     const collision = await POST(...rpc(SECRET, { jsonrpc: '2.0', id: 1, method: 'tools/list' }));
-    expect((await collision.json()).result.tools.map((tool: { name: string }) => tool.name)).toEqual([...TOOL_NAMES]);
+    expect((await collision.json()).result.tools.map((tool: { name: string }) => tool.name)).toEqual([...TOOL_NAMES, ...WRITE_TOOL_NAMES]);
     process.env.MCP_WRITE_SECRET = WRITE_SECRET;
     vi.stubEnv('CONNECT_SECRET', WRITE_SECRET);
     expect((await POST(...rpc(WRITE_SECRET, initialize))).status).toBe(404);
@@ -127,7 +131,7 @@ describe("/mcp/[secret]", () => {
     ];
     for (const [tool, args, path, method, body] of cases) {
       fetchMock.mockClear();
-      const result = await call(WRITE_SECRET, tool, args);
+      const result = await call(SECRET, tool, args);
       expect(result.result.isError, tool).not.toBe(true);
       const [url, init] = fetchMock.mock.calls[0];
       expect(url.pathname, tool).toBe(path);
@@ -153,17 +157,17 @@ describe("/mcp/[secret]", () => {
       ['set_cost_override', { accountCode: '610', month: '2030-01', amount: -1 }],
       ['save_cost_forecast_rule', { change: { type: 'recurring', rule: { accountCode: '610', streamKey: 's', label: 'Example', amount: 1, frequencyMonths: 1, startMonth: '2030-02', endMonth: '2030-01' } } }],
     ];
-    for (const [name, args] of cases) expect((await call(WRITE_SECRET, name, args)).result.isError, name).toBe(true);
+    for (const [name, args] of cases) expect((await call(SECRET, name, args)).result.isError, name).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns tool errors for API rejection or failed read-back, without reporting a successful save', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Schedule already claimed', { status: 409 })));
-    const failed = await call(WRITE_SECRET, 'save_cost_forecast_rule', { change: { type: 'one_off', transactionId: 'p' } });
+    const failed = await call(SECRET, 'save_cost_forecast_rule', { change: { type: 'one_off', transactionId: 'p' } });
     expect(failed.result.isError).toBe(true);
     expect(failed.result.content[0].text).toContain('409');
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ overrides: [] })));
-    const mismatch = await call(WRITE_SECRET, 'set_cost_override', { accountCode: '610', month: '2030-01', amount: 100 });
+    const mismatch = await call(SECRET, 'set_cost_override', { accountCode: '610', month: '2030-01', amount: 100 });
     expect(mismatch.result.isError).toBe(true);
     expect(mismatch.result.content[0].text).toContain('may have been applied');
   });

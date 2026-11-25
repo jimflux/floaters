@@ -30,8 +30,8 @@ Copy the values from the current Render service / `apps/api/.env`:
 | `SUPABASE_URL` | unchanged |
 | `SUPABASE_SERVICE_ROLE_KEY` | unchanged |
 | `JWT_SECRET` | unchanged |
-| `MCP_SECRET` | Optional remote read-only MCP capability URL; independently generated random secret, at least 16 characters. |
-| `MCP_WRITE_SECRET` | Optional remote forecast-write MCP capability URL. Generate separately from `MCP_SECRET` and `CONNECT_SECRET`. Existing read-only URLs keep their scope. |
+| `MCP_SECRET` | Remote read/write MCP capability URL; independently generated random secret, at least 16 characters. |
+| `MCP_WRITE_SECRET` | Optional compatibility alias for previously issued MCP URLs. New connections use `MCP_SECRET` for both reads and writes. |
 | `CONNECT_SECRET` | the API key for the MCP server and scripts (`Authorization: Bearer …`). Never given to the web app. |
 | `FLUX_LOGIN_SECRET` | this tool's login.flux.am secret: a reference to `${{flux-login.TOOL_SECRET_FLOATERS}}`. Unset means web sign-in is off and only the API key works. |
 | `BURNBAR_URL` | `https://burn.flux.am`. Optional, with `BURNBAR_READ_TOKEN`: without both, the Hours section says BurnBar isn't set up. |

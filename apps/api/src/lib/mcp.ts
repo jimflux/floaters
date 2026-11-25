@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { createApiClient } from "@floaters/mcp-tools";
 
-// Remote MCP capability URLs use separate read and write secrets, never the
-// application's CONNECT_SECRET. Missing credentials do not expose a scope.
+// One remote MCP connection exposes reads and forecast writes. The earlier
+// separate write credential remains accepted as an alias so existing clients work.
 
 export function mcpSecretMatches(candidate: string): boolean {
   const expected = process.env.MCP_SECRET?.trim();
@@ -12,13 +12,13 @@ export function mcpSecretMatches(candidate: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Resolve scopes without ever upgrading an existing read-only URL. */
-export function mcpAccess(candidate: string): 'read' | 'write' | null {
-  if (mcpSecretMatches(candidate)) return 'read';
+/** Authenticate the canonical URL or the previously issued write-URL alias. */
+export function mcpAccess(candidate: string): boolean {
+  if (mcpSecretMatches(candidate)) return true;
   const expected = process.env.MCP_WRITE_SECRET?.trim();
-  if (!expected || expected.length < 16 || expected === process.env.MCP_SECRET?.trim() || expected === process.env.CONNECT_SECRET?.trim()) return null;
+  if (!expected || expected.length < 16 || expected === process.env.CONNECT_SECRET?.trim()) return false;
   const a = Buffer.from(candidate), b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b) ? 'write' : null;
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export function localApiClient(base = `http://127.0.0.1:${process.env.PORT ?? 3000}`) {
