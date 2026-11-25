@@ -25,11 +25,13 @@ export async function GET() {
   try {
     const connectionId = await requireConnection();
 
-    const { data } = await supabase
+    const { data, error: dbError } = await supabase
       .from("income_projections")
       .select("*")
       .eq("connection_id", connectionId)
       .order("expected_month", { ascending: true });
+
+    if (dbError) return error('Could not load saved forecast settings', 500);
 
     return json({ projections: ((data as ProjectionRow[]) || []).map(projectionToApi) });
   } catch (err) {

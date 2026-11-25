@@ -2,23 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { registerFloatersTools } from "@floaters/mcp-tools";
-import { mcpSecretMatches, localApiGet } from "@/lib/mcp";
+import { mcpAccess, localApiClient } from "@/lib/mcp";
 
 // Remote MCP endpoint (Streamable HTTP, stateless) for claude.ai and any other
-// remote MCP client: https://<api>/mcp/<MCP_SECRET>. Same read-only tools as
-// the stdio server. Stateless means one server + transport per request and no
+// remote MCP client. Read and write credentials select which shared tools
+// are registered. Stateless means one server + transport per request and no
 // session ids, which is what a serverless-style route handler can honour.
 
 export const dynamic = "force-dynamic";
 
 async function handle(request: NextRequest, context: { params: Promise<{ secret: string }> }) {
   const { secret } = await context.params;
-  if (!mcpSecretMatches(secret)) {
+  const access = mcpAccess(secret);
+  if (!access) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const server = new McpServer({ name: "floaters", version: "1.0.0" });
-  registerFloatersTools(server, localApiGet());
+  const api = localApiClient();
+  registerFloatersTools(server, api.get, access === 'write' ? api.write : undefined);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
@@ -42,7 +44,7 @@ export const DELETE = handle;
 // holding the connection.
 export async function GET(request: NextRequest, context: { params: Promise<{ secret: string }> }) {
   const { secret } = await context.params;
-  if (!mcpSecretMatches(secret)) {
+  if (!mcpAccess(secret)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   return NextResponse.json(

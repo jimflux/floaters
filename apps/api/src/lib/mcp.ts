@@ -1,10 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
-import type { ApiGet } from "@floaters/mcp-tools";
+import { createApiClient } from "@floaters/mcp-tools";
 
-// Remote MCP endpoint support. The endpoint lives at /mcp/<MCP_SECRET>: the
-// secret in the path is the whole access control (claude.ai custom connectors
-// send no credentials), so it must be its own value, never CONNECT_SECRET.
-// With MCP_SECRET unset the endpoint does not exist (404 for every path).
+// Remote MCP capability URLs use separate read and write secrets, never the
+// application's CONNECT_SECRET. Missing credentials do not expose a scope.
 
 export function mcpSecretMatches(candidate: string): boolean {
   const expected = process.env.MCP_SECRET?.trim();
@@ -14,24 +12,16 @@ export function mcpSecretMatches(candidate: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/**
- * GETs against this same API over loopback, authenticated with the API key.
- * Tool calls therefore read exactly what the web app reads, and can't reach
- * anything the API's own auth would refuse.
- */
-export function localApiGet(base = `http://127.0.0.1:${process.env.PORT ?? 3000}`): ApiGet {
-  return async <T = unknown>(path: string, params?: Record<string, string | number | undefined>) => {
-    const url = new URL(base + path);
-    for (const [k, v] of Object.entries(params ?? {})) {
-      if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
-    }
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${process.env.CONNECT_SECRET ?? ""}` },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`GET ${path} failed: ${res.status} ${res.statusText} ${body}`.trim());
-    }
-    return (await res.json()) as T;
-  };
+/** Resolve scopes without ever upgrading an existing read-only URL. */
+export function mcpAccess(candidate: string): 'read' | 'write' | null {
+  if (mcpSecretMatches(candidate)) return 'read';
+  const expected = process.env.MCP_WRITE_SECRET?.trim();
+  if (!expected || expected.length < 16 || expected === process.env.MCP_SECRET?.trim() || expected === process.env.CONNECT_SECRET?.trim()) return null;
+  const a = Buffer.from(candidate), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b) ? 'write' : null;
 }
+
+export function localApiClient(base = `http://127.0.0.1:${process.env.PORT ?? 3000}`) {
+  return createApiClient(() => ({ base, key: process.env.CONNECT_SECRET ?? '' }));
+}
+export function localApiGet(base?: string) { return localApiClient(base).get; }

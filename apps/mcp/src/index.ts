@@ -1,20 +1,17 @@
 #!/usr/bin/env node
-// Floaters MCP server — read-only access to the cash flow data for OpenClaw and
-// other stdio MCP clients. The tool surface lives in @floaters/mcp-tools and is
-// shared with the API's remote endpoint for claude.ai; every tool is a GET
-// against the Floaters API, so this server can only ever read.
+// Floaters MCP server. Existing stdio clients remain read-only unless explicitly enabled.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerFloatersTools } from "@floaters/mcp-tools";
-import { apiGet } from "./client.js";
+import { apiGet, apiWrite } from "./client.js";
 
 const server = new McpServer({
   name: "floaters",
   version: "1.0.0",
 });
 
-registerFloatersTools(server, apiGet);
+registerFloatersTools(server, apiGet, process.env.FLOATERS_MCP_ALLOW_WRITES === 'true' ? apiWrite : undefined);
 
 async function main() {
   const transport = new StdioServerTransport();

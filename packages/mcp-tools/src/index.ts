@@ -1,30 +1,12 @@
-// Floaters MCP tools: read-only views over the API's GET endpoints, so any MCP
-// client (OpenClaw over stdio, claude.ai over Streamable HTTP) sees exactly the
-// cashflow/time computation the web app sees and can never mutate anything.
-// The transport and the HTTP client are injected; this module only knows the
-// tool surface.
-
+// Shared MCP tools, using the same authenticated API as the web app.
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-
-export type ApiGet = <T = unknown>(
-  path: string,
-  params?: Record<string, string | number | undefined>
-) => Promise<T>;
-
-export type ToolResult = {
-  content: { type: "text"; text: string }[];
-  isError?: boolean;
-};
-
-export function ok(data: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-
-export function fail(err: unknown): ToolResult {
-  const message = err instanceof Error ? err.message : String(err);
-  return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
-}
+import type { ApiGet, ApiWrite } from './client';
+import { ok, fail } from './result';
+import { registerWriteTools } from './write-tools';
+export { createApiClient, type ApiGet, type ApiWrite } from './client';
+export { ok, fail, type ToolResult } from './result';
+export { WRITE_TOOL_NAMES } from './write-tools';
 
 export const TOOL_NAMES = [
   "get_cashflow",
@@ -34,16 +16,20 @@ export const TOOL_NAMES = [
   "list_transactions",
   "get_time_tracking",
   "list_time_entries",
+  "get_forecast_settings",
 ] as const;
 
-export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
+export function registerFloatersTools(server: McpServer, apiGet: ApiGet, apiWrite?: ApiWrite): void {
   server.registerTool(
     "get_cashflow",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "Get cash flow",
       description:
         "Monthly cashflow with income as a pipeline rolled up by client and costs grouped by Xero chart-of-accounts. Income has three layers per client per month: paid (cash received), invoiced (promises: remaining amount due, overdue rolled into the current month and flagged), and projected (unfulfilled projection remainders at their expected month). Client keys are explicit ('contact:<id>', 'label:<normalised>', or 'UNASSIGNED' for non-invoice income). Two balance walks: committed (cash plus invoices sent plus cost forecasts; the headline, so fallsBelowZeroIn reads this and never includes hope) and optimistic (committed plus projection remainders; optimisticFallsBelowZeroIn). Both are identical over history. Past months are pure cash; the current month blends cash-to-date with a projected remainder; costs combine known bills, reviewed recurring schedules and variable estimates, matching by supplier, description and account to avoid double counting. Manual overrides are expected month totals with known cash and bills as the minimum. costForecast contains suggestions, saved rules and recent payments; suggestions never schedule themselves. Cost rows include a per-month breakdown. The runway uses the same estimates beyond the chart window. When VAT is enabled: a VAT_LIABILITY cost row shows the quarterly output-VAT bill in its payment month (its monthly is the committed/issued-only bill, and vatProjectedBill is the issued + projected bill the web shows on the projected view; issued-invoice VAT reduces committed, projected-invoice VAT reduces only optimistic); vatOwedNow is output VAT accrued on issued invoices this quarter but not yet paid; vatAdjustedClosing is committed closing minus that running liability (true spendable cash, continuous across payment months). These VAT fields are absent when VAT is off. Note: get_forecast uses a separate engine that predates the pipeline model.",
       inputSchema: {
+        excludeCost: z.array(z.string().min(1).max(100)).max(100).optional().describe('Temporarily exclude cost account codes from this what-if forecast and totals, without saving or hiding rows.'),
+        excludeClient: z.array(z.string().min(1).max(200)).max(100).optional().describe('Temporarily exclude income client keys from this what-if forecast, without changing saved projections.'),
         monthsBack: z
           .number()
           .int()
@@ -60,9 +46,9 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
           .describe("Projected months to include (default 12, max 24)."),
       },
     },
-    async ({ monthsBack, monthsForward }) => {
+    async ({ monthsBack, monthsForward, excludeCost, excludeClient }) => {
       try {
-        return ok(await apiGet("/api/cashflow", { back: monthsBack, forward: monthsForward }));
+        return ok(await apiGet("/api/cashflow", { back: monthsBack, forward: monthsForward, excludeCost, excludeClient }));
       } catch (err) {
         return fail(err);
       }
@@ -72,6 +58,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "get_income_pipeline",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "Get income pipeline",
       description:
         "Item-level view of the income pipeline: projections (client key as used by get_cashflow, VAT-inclusive amount, expected month, remainder after assigned invoices, derived lapsed flag, assigned invoice ids), unreviewed invoices awaiting triage (with overdue flags), and the known client contacts. Lapsed projections are hope whose expected month passed unfulfilled; they are excluded from the optimistic balance line until re-dated or deleted.",
@@ -89,6 +76,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "get_connection",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "Get connection & balances",
       description:
         "The connected Xero organisation, its bank accounts, and current balances (total and per account).",
@@ -106,6 +94,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "get_forecast",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "Get cash flow forecast",
       description:
         "Day/week/month forecast periods with opening, inflows, outflows and closing balance over a date range, optionally overlaying what-if scenarios. Uses a separate engine that predates the income pipeline: overdue invoices are not rolled forward and income projections are not included, so it can disagree with get_cashflow's committed series.",
@@ -149,6 +138,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "list_transactions",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "List outstanding invoices & bills",
       description:
         "Outstanding invoices (ACCREC) and bills (ACCPAY) with amounts due, due dates and any expected payment date overrides.",
@@ -175,6 +165,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "get_time_tracking",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "Get time tracking (hours by client)",
       description:
         "Hours worked, read live from BurnBar (Jim's time tracker), rolled up by BurnBar client per month over the same window as get_cashflow (future months are zero; months before January 2026 are always zero, as hours start then). Each client has total hours, a per-project breakdown, and, when the client is linked to an income-pipeline client (clientKey matches get_cashflow's, linkSource 'manual' or 'auto' by name), invoicedExVat: the ex-VAT ACCREC invoice totals by issue month, so invoicedExVat[i] / hours[i] is that month's effective rate. Also returns todayHours, weekHours (Monday to date), the most recently started running entry if any, and when BurnBar was last read (lastSyncedAt; syncError if the read failed). BurnBar has no billable flag, so billable hours are zero and the toggl-prefixed ids are BurnBar ids. Hours are context only: nothing here feeds the balance walks. configured is false when the API has no BURNBAR_URL or BURNBAR_READ_TOKEN.",
@@ -207,6 +198,7 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
   server.registerTool(
     "list_time_entries",
     {
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
       title: "List time entries",
       description:
         "Individual BurnBar time entries over an inclusive local-date range (default: the last 7 days, max 92 days; nothing before January 2026), newest first, with project, client, linked pipeline clientKey, start/stop, duration, and whether the entry is still running. togglId is the BurnBar entry id (a UUID); billable is always false and tags empty. Totals for the range are included.",
@@ -231,4 +223,18 @@ export function registerFloatersTools(server: McpServer, apiGet: ApiGet): void {
       }
     }
   );
+  server.registerTool('get_forecast_settings', {
+    title: 'Get saved forecast controls',
+    description: 'Use before editing forecasts to inspect saved income projections, manual account/month cost totals, hidden cost account codes and saved cost schedules or classifications. These are saved settings, not the blended current-month cashflow cells. Hidden rows still count in balances; temporary exclusions use get_cashflow parameters.',
+    inputSchema: {}, annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  }, async () => {
+    try {
+      const [projections, overrides, hiddenAccounts, costSettings] = await Promise.all([
+        apiGet('/api/projections'), apiGet('/api/projection-overrides'), apiGet('/api/hidden-accounts'), apiGet('/api/cost-settings'),
+      ]);
+      return ok({ projections, overrides, hiddenAccounts, costSettings });
+    } catch (error) { return fail(error); }
+  });
+  if (apiWrite) registerWriteTools(server, apiGet, apiWrite);
+
 }
