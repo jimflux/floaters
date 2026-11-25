@@ -5,8 +5,8 @@ import { registerFloatersTools } from "@floaters/mcp-tools";
 import { mcpAccess, localApiClient } from "@/lib/mcp";
 
 // Remote MCP endpoint (Streamable HTTP, stateless) for claude.ai and any other
-// remote MCP client. Read and write credentials select which shared tools
-// are registered. Stateless means one server + transport per request and no
+// remote MCP client. Every authenticated connection exposes reads and forecast
+// writes. Stateless means one server + transport per request and no
 // session ids, which is what a serverless-style route handler can honour.
 
 export const dynamic = "force-dynamic";
@@ -18,9 +18,9 @@ async function handle(request: NextRequest, context: { params: Promise<{ secret:
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const server = new McpServer({ name: "floaters", version: "1.0.0" });
+  const server = new McpServer({ name: "floaters", version: "1.1.0" });
   const api = localApiClient();
-  registerFloatersTools(server, api.get, access === 'write' ? api.write : undefined);
+  registerFloatersTools(server, api.get, api.write);
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
