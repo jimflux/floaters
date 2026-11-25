@@ -6,10 +6,12 @@ export async function GET() {
   try {
     const connectionId = await requireConnection();
 
-    const { data } = await supabase
+    const { data, error: dbError } = await supabase
       .from("hidden_accounts")
       .select("account_code")
       .eq("connection_id", connectionId);
+
+    if (dbError) return error('Could not load saved forecast settings', 500);
 
     return json({ hiddenAccounts: (data || []).map((r) => r.account_code) });
   } catch (err) {
@@ -49,11 +51,13 @@ export async function DELETE(request: NextRequest) {
 
     if (!accountCode) return error("accountCode query param required", 400);
 
-    await supabase
+    const { error: dbError } = await supabase
       .from("hidden_accounts")
       .delete()
       .eq("connection_id", connectionId)
       .eq("account_code", accountCode);
+
+    if (dbError) return error('Could not remove saved forecast setting', 500);
 
     return json({ ok: true });
   } catch (err) {

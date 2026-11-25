@@ -72,11 +72,13 @@ export async function DELETE(
 
     // FK on xero_invoices.projection_id is on-delete-set-null: assigned
     // invoices are released to standalone, reviewed_at untouched (R16).
-    await supabase
+    const { error: dbError } = await supabase
       .from("income_projections")
       .delete()
       .eq("id", id)
       .eq("connection_id", connectionId);
+
+    if (dbError) return error('Could not remove saved forecast setting', 500);
 
     return json({ ok: true });
   } catch (err) {

@@ -16,7 +16,8 @@ const src = shared.slice(shared.indexOf("export function registerFloatersTools")
 
 describe("MCP tool registration", () => {
   it("wires the shared tools into the stdio server", () => {
-    expect(entry).toContain("registerFloatersTools(server, apiGet)");
+    expect(entry).toContain("registerFloatersTools(server, apiGet,");
+    expect(entry).toContain("process.env.FLOATERS_MCP_ALLOW_WRITES === 'true' ? apiWrite : undefined");
     expect(entry).toContain("StdioServerTransport");
   });
 

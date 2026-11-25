@@ -13,7 +13,7 @@ Originally two repos (a Next.js API + a Lovable-built frontend); now a single np
 ```
 apps/api      Next.js API (App Router, API routes only) — Xero sync + cashflow engine
 apps/web      Vite + React 19 + shadcn/ui frontend (was the Lovable app)
-apps/mcp      Read-only stdio MCP server exposing the cashflow data to OpenClaw
+apps/mcp      Stdio MCP server; read-only by default, optional forecast write tools
 packages/types Shared API contract (the cashflow response shape) imported by all apps
 packages/mcp-tools MCP tool definitions shared by apps/mcp and the API's remote /mcp endpoint
 ```
@@ -77,9 +77,10 @@ React Query for data; the cashflow query is `['cashflow']`, hours are `['time']`
 
 ## MCP (`packages/mcp-tools`, `apps/mcp`, `/mcp/<secret>`)
 
-Read-only. The tool definitions (`get_cashflow`, `get_income_pipeline`, `get_connection`, `get_forecast`, `list_transactions`, `get_time_tracking`, `list_time_entries`) live in `packages/mcp-tools` (`registerFloatersTools(server, apiGet)`) and are GETs against the API, so no MCP client can mutate anything. Two transports share them:
-- `apps/mcp`: stdio server for OpenClaw. Config: `FLOATERS_API_URL` + `FLOATERS_API_KEY`. esbuild bundles the shared package (only the SDK and zod stay external).
-- `apps/api/src/app/mcp/[secret]/route.ts`: remote Streamable HTTP endpoint (stateless, JSON responses) for claude.ai custom connectors at `https://floaters.flux.am/mcp/<MCP_SECRET>`. The path secret is the whole access control (claude.ai sends no credentials), so `MCP_SECRET` is its own value, never `CONNECT_SECRET`; unset means 404 everywhere. Tool calls GET the API over loopback with `CONNECT_SECRET` (`src/lib/mcp.ts`).
+Shared tool definitions live in `packages/mcp-tools`. Eight read tools cover cashflow, pipeline, balances, forecast, transactions, time and saved forecast controls. Nine optional write tools edit income projections, cost overrides/schedules/classifications, row visibility and local invoice date/review/assignment. They use the authenticated API and never write Xero, sync data or expose arbitrary HTTP/SQL. `get_cashflow` accepts temporary `excludeCost` / `excludeClient` arrays; hidden cost rows still count in totals.
+- `apps/mcp`: stdio for local clients. `FLOATERS_API_URL` + `FLOATERS_API_KEY`; writes require the explicit `FLOATERS_MCP_ALLOW_WRITES=true` opt-in.
+- `apps/api/src/app/mcp/[secret]/route.ts`: stateless remote Streamable HTTP. `MCP_SECRET` keeps the original read-only scope. A separate `MCP_WRITE_SECRET` enables both reads and forecast writes at `/mcp/<MCP_WRITE_SECRET>`. Each secret must be independently generated and at least 16 characters; matching read/write secrets cannot upgrade a read URL. Both loop back through the existing API with `CONNECT_SECRET`.
+- `packages/mcp-tools/src/client.ts` is the shared authenticated HTTP client. Inputs are validated before calls; mutations are explicitly annotated for clients. Tool errors preserve API failures, and cost override / visibility writes verify read-back. Database read/delete errors in forecast control routes must not be swallowed.
 See `apps/mcp/README.md` for both setups.
 
 ## Deployment
@@ -88,6 +89,6 @@ API → Railway (always-on; `railway.json` at the root). See `docs/DEPLOY-RAILWA
 
 ## Environment Variables
 
-API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FLUX_LOGIN_SECRET` (enables login.flux.am sign-in), `BURNBAR_URL` / `BURNBAR_READ_TOKEN` (optional; enable hours from BurnBar), `MCP_SECRET` (optional; enables the remote MCP endpoint).
+API (`apps/api/.env`): `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REDIRECT_URI`, `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `CONNECT_SECRET`, `FLUX_LOGIN_SECRET` (enables login.flux.am sign-in), `BURNBAR_URL` / `BURNBAR_READ_TOKEN` (optional; enable hours from BurnBar), `MCP_SECRET` (optional read-only MCP) and `MCP_WRITE_SECRET` (optional independent forecast-write MCP).
 Web (dev only, `apps/web/.env`): `FLOATERS_DEV_API_URL`, `FLOATERS_DEV_API_KEY`. The production web build takes no variables.
-MCP: `FLOATERS_API_URL`, `FLOATERS_API_KEY`.
+MCP: `FLOATERS_API_URL`, `FLOATERS_API_KEY`, optional `FLOATERS_MCP_ALLOW_WRITES=true`.

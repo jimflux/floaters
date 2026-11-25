@@ -13,10 +13,12 @@ export async function GET() {
   try {
     const connectionId = await requireConnection();
 
-    const { data } = await supabase
+    const { data, error: dbError } = await supabase
       .from("projection_overrides")
       .select("account_code, month, amount")
       .eq("connection_id", connectionId);
+
+    if (dbError) return error('Could not load saved forecast settings', 500);
 
     return json({
       overrides: (data || []).map((r) => ({
@@ -75,12 +77,14 @@ export async function DELETE(request: NextRequest) {
       return error("accountCode and month query params required", 400);
     }
 
-    await supabase
+    const { error: dbError } = await supabase
       .from("projection_overrides")
       .delete()
       .eq("connection_id", connectionId)
       .eq("account_code", accountCode)
       .eq("month", month);
+
+    if (dbError) return error('Could not remove saved forecast setting', 500);
 
     return json({ ok: true });
   } catch (err) {
